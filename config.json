@@ -1,0 +1,9 @@
+{
+  "N_H": 200,
+  "N_F": 5,
+  "wage_rate": 0.8,
+  "p": 2.0,
+  "household_size": 4,
+  "food_per_person": 1,
+  "M0": 40000
+}
