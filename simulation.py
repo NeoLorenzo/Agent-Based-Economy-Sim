@@ -1,3 +1,5 @@
+# simulation.py
+
 import random
 
 #======================================
@@ -17,12 +19,12 @@ class Household:
         """Calculates how much food the household wants to buy."""
         return self.size * food_per_person
 
-    def place_order_and_pay(self, price):
+    def place_order_and_pay(self, price, food_per_person):
         """
         Calculates food demand, determines what can be afforded,
         and returns the quantity purchased. Updates balance.
         """
-        food_demand = self.determine_food_demand(food_per_person=1) # Using a default from your doc
+        food_demand = self.determine_food_demand(food_per_person)
         cost = food_demand * price
 
         if self.balance >= cost:
@@ -117,7 +119,10 @@ class Simulation:
         # 1. Shopping Phase
         for hh in self.households.values():
             chosen_firm = random.choice(firm_list)
-            purchased_qty = hh.place_order_and_pay(price=chosen_firm.price)
+            purchased_qty = hh.place_order_and_pay(
+                price=chosen_firm.price,
+                food_per_person=self.config['food_per_person']
+            )
 
             if purchased_qty > 0:
                 # A transaction occurred, record it

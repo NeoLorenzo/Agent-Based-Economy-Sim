@@ -1,3 +1,5 @@
+# main.py
+
 import json
 import pygame
 import sys
@@ -5,25 +7,7 @@ import random
 import math
 import numpy as np
 from simulation import Simulation
-
-#======================================
-# VISUALIZATION SETTINGS
-#======================================
-# --- Colors ---
-COLOR_BACKGROUND = (25, 25, 25)
-COLOR_HOUSEHOLD = (173, 216, 230) # Light Blue
-COLOR_FIRM = (255, 182, 193)      # Light Pink
-COLOR_MONEY = (255, 255, 0)       # Yellow
-
-# --- Layout ---
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
-SCREEN_PADDING = 50 # Used for random agent placement
-FIRM_Y_POSITION = 100
-HOUSEHOLD_GRID_START_Y = 250
-AGENT_RADIUS = 5
-PARTICLE_RADIUS = 2
-PARTICLE_SPEED = 4
+import constants as C
 
 #======================================
 # PARTICLE CLASS for Animation
@@ -51,11 +35,11 @@ class Particle:
 
             # If the next step is longer than the remaining distance,
             # just move to the end point. Otherwise, take a normal step.
-            if remaining_distance <= PARTICLE_SPEED:
+            if remaining_distance <= C.PARTICLE_SPEED:
                 self.current_pos = self.end_pos
                 self.finished = True
             else:
-                self.current_pos += self.direction * PARTICLE_SPEED
+                self.current_pos += self.direction * C.PARTICLE_SPEED
 
     def draw(self, surface):
         """Draws the particle on the screen."""
@@ -63,7 +47,7 @@ class Particle:
         # to render it one last time at its final destination after the update() call
         # that sets finished = True. It will be removed from the active list
         # immediately after this final draw call, effectively disappearing on the next frame.
-        pygame.draw.circle(surface, COLOR_MONEY, (int(self.current_pos.x), int(self.current_pos.y)), PARTICLE_RADIUS)
+        pygame.draw.circle(surface, C.COLOR_MONEY, (int(self.current_pos.x), int(self.current_pos.y)), C.PARTICLE_RADIUS)
 
 #======================================
 # HELPER FUNCTIONS
@@ -83,8 +67,8 @@ def calculate_agent_positions(sim):
 
     # Generate all possible positions at once using NumPy for efficiency (Rule 12)
     # This creates a more organic, realistic distribution of agents (Rule 3)
-    rand_x = np.random.randint(SCREEN_PADDING, SCREEN_WIDTH - SCREEN_PADDING, total_agents)
-    rand_y = np.random.randint(SCREEN_PADDING, SCREEN_HEIGHT - SCREEN_PADDING, total_agents)
+    rand_x = np.random.randint(C.SCREEN_PADDING, C.SCREEN_WIDTH - C.SCREEN_PADDING, total_agents)
+    rand_y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING, total_agents)
     all_positions = list(zip(rand_x, rand_y))
     
     # Shuffle the list of generated positions to ensure random assignment
@@ -109,7 +93,7 @@ def calculate_agent_positions(sim):
 def draw_agents(surface, agent_positions, color):
     """Draws agents based on their pre-calculated positions."""
     for pos in agent_positions.values():
-        pygame.draw.circle(surface, color, (int(pos[0]), int(pos[1])), AGENT_RADIUS)
+        pygame.draw.circle(surface, color, (int(pos[0]), int(pos[1])), C.AGENT_RADIUS)
 
 #======================================
 # MAIN APPLICATION
@@ -117,7 +101,7 @@ def draw_agents(surface, agent_positions, color):
 def main():
     # --- Initialization ---
     pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
     pygame.display.set_caption("Agent-Based Economy Simulation")
     clock = pygame.time.Clock()
     
@@ -150,11 +134,11 @@ def main():
                 active_particles.append(Particle(start_pos, end_pos))
 
         # --- Update and Draw ---
-        screen.fill(COLOR_BACKGROUND)
+        screen.fill(C.COLOR_BACKGROUND)
         
         # Draw static agents
-        draw_agents(screen, firm_positions, COLOR_FIRM)
-        draw_agents(screen, household_positions, COLOR_HOUSEHOLD)
+        draw_agents(screen, firm_positions, C.COLOR_FIRM)
+        draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
         
         # Update and draw all active particles
         for particle in active_particles:
@@ -165,7 +149,7 @@ def main():
         active_particles = [p for p in active_particles if not p.finished]
         
         pygame.display.flip()
-        clock.tick(60)
+        clock.tick(C.FPS)
 
     # --- Shutdown ---
     pygame.quit()
