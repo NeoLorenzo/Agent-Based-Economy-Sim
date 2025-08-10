@@ -3,6 +3,7 @@ import pygame
 import sys
 import random
 import math
+import numpy as np
 from simulation import Simulation
 
 #======================================
@@ -17,6 +18,7 @@ COLOR_MONEY = (255, 255, 0)       # Yellow
 # --- Layout ---
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
+SCREEN_PADDING = 50 # Used for random agent placement
 FIRM_Y_POSITION = 100
 HOUSEHOLD_GRID_START_Y = 250
 AGENT_RADIUS = 5
@@ -58,27 +60,40 @@ class Particle:
 # HELPER FUNCTIONS
 #======================================
 def calculate_agent_positions(sim):
-    """Calculates the screen positions for all firms and households."""
+    """
+    Calculates random screen positions for all firms and households.
+    This abstraction moves away from an artificial grid layout to a more
+    organic, random distribution, which is a step towards greater realism.
+    """
     firm_positions = {}
     hh_positions = {}
-    x_padding = 50
-
-    # Calculate firm positions (in a line)
+    
     num_firms = len(sim.firms)
-    firm_spacing = (SCREEN_WIDTH - 2 * x_padding) / (num_firms - 1) if num_firms > 1 else 0
-    for i, firm_id in enumerate(sim.firms.keys()):
-        x = x_padding + i * firm_spacing
-        firm_positions[firm_id] = (x, FIRM_Y_POSITION)
-
-    # Calculate household positions (in a grid)
     num_households = len(sim.households)
-    agents_per_row = int((SCREEN_WIDTH - 2 * x_padding) / (AGENT_RADIUS * 4))
-    for i, hh_id in enumerate(sim.households.keys()):
-        row = i // agents_per_row
-        col = i % agents_per_row
-        x = x_padding + col * (AGENT_RADIUS * 4)
-        y = HOUSEHOLD_GRID_START_Y + row * (AGENT_RADIUS * 4)
-        hh_positions[hh_id] = (x, y)
+    total_agents = num_firms + num_households
+
+    # Generate all possible positions at once using NumPy for efficiency (Rule 12)
+    # This creates a more organic, realistic distribution of agents (Rule 3)
+    rand_x = np.random.randint(SCREEN_PADDING, SCREEN_WIDTH - SCREEN_PADDING, total_agents)
+    rand_y = np.random.randint(SCREEN_PADDING, SCREEN_HEIGHT - SCREEN_PADDING, total_agents)
+    all_positions = list(zip(rand_x, rand_y))
+    
+    # Shuffle the list of generated positions to ensure random assignment
+    random.shuffle(all_positions)
+
+    # Assign positions to firms
+    firm_ids = list(sim.firms.keys())
+    for i in range(num_firms):
+        firm_id = firm_ids[i]
+        position = all_positions.pop()
+        firm_positions[firm_id] = position
+
+    # Assign the remaining positions to households
+    household_ids = list(sim.households.keys())
+    for i in range(num_households):
+        household_id = household_ids[i]
+        position = all_positions.pop()
+        hh_positions[household_id] = position
         
     return firm_positions, hh_positions
 
