@@ -44,17 +44,26 @@ class Particle:
         self.finished = False
 
     def update(self):
-        """Moves the particle closer to its destination."""
+        """Moves the particle closer to its destination without overshooting."""
         if not self.finished:
-            self.current_pos += self.direction * PARTICLE_SPEED
-            # Check if particle has reached or passed the destination
-            if (self.current_pos - self.start_pos).length() >= self.distance_to_travel:
+            # Calculate remaining distance to the destination
+            remaining_distance = (self.end_pos - self.current_pos).length()
+
+            # If the next step is longer than the remaining distance,
+            # just move to the end point. Otherwise, take a normal step.
+            if remaining_distance <= PARTICLE_SPEED:
+                self.current_pos = self.end_pos
                 self.finished = True
+            else:
+                self.current_pos += self.direction * PARTICLE_SPEED
 
     def draw(self, surface):
         """Draws the particle on the screen."""
-        if not self.finished:
-            pygame.draw.circle(surface, COLOR_MONEY, (int(self.current_pos.x), int(self.current_pos.y)), PARTICLE_RADIUS)
+        # We draw the particle regardless of its 'finished' state. This allows us
+        # to render it one last time at its final destination after the update() call
+        # that sets finished = True. It will be removed from the active list
+        # immediately after this final draw call, effectively disappearing on the next frame.
+        pygame.draw.circle(surface, COLOR_MONEY, (int(self.current_pos.x), int(self.current_pos.y)), PARTICLE_RADIUS)
 
 #======================================
 # HELPER FUNCTIONS
