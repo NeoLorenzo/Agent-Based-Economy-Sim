@@ -16,10 +16,11 @@ import logging_setup
 #======================================
 class Particle:
     """Represents an animated particle for visualizing flows."""
-    def __init__(self, start_pos, end_pos):
+    def __init__(self, start_pos, end_pos, color):
         self.start_pos = pygame.math.Vector2(start_pos)
         self.end_pos = pygame.math.Vector2(end_pos)
         self.current_pos = self.start_pos
+        self.color = color
         self.distance_to_travel = (self.end_pos - self.start_pos).length()
         
         if self.distance_to_travel > 0:
@@ -49,7 +50,7 @@ class Particle:
         # to render it one last time at its final destination after the update() call
         # that sets finished = True. It will be removed from the active list
         # immediately after this final draw call, effectively disappearing on the next frame.
-        pygame.draw.circle(surface, C.COLOR_MONEY, (int(self.current_pos.x), int(self.current_pos.y)), C.PARTICLE_RADIUS)
+        pygame.draw.circle(surface, self.color, (int(self.current_pos.x), int(self.current_pos.y)), C.PARTICLE_RADIUS)
 
 #======================================
 # HELPER FUNCTIONS
@@ -152,10 +153,13 @@ def main():
             
             # Create new particles for each transaction
             for trans in transactions:
-                start_pos = household_positions.get(trans['from_id'])
-                end_pos = firm_positions.get(trans['to_id'])
+                # Determine if it's a payment from a household to a firm, or a wage from a firm to a household
+                start_pos = household_positions.get(trans['from_id'], firm_positions.get(trans['from_id']))
+                end_pos = firm_positions.get(trans['to_id'], household_positions.get(trans['to_id']))
+                
                 if start_pos and end_pos:
-                    active_particles.append(Particle(start_pos, end_pos))
+                    color = C.COLOR_MONEY if trans['type'] == 'spending' else C.COLOR_WAGE
+                    active_particles.append(Particle(start_pos, end_pos, color))
 
             # --- Update and Draw ---
             screen.fill(C.COLOR_BACKGROUND)

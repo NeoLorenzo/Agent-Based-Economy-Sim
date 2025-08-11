@@ -61,24 +61,41 @@ class Firm:
         self.revenue_this_tick += amount
 
     def pay_workers(self, households_dict):
-        """Pays wages to all its employees."""
+        """
+        Pays wages to all its employees and returns a list of transactions.
+        """
         # First, update balance with revenue from this tick's sales
         self.balance += self.revenue_this_tick
         self.revenue_this_tick = 0 # Reset for next tick
+        
+        wage_transactions = []
 
         if not self.worker_ids:
-            return # No workers to pay
+            return wage_transactions # No workers to pay
 
         # Calculate the total amount to be paid as wages
         total_payout = self.balance * self.wage_rate
+        
+        # Avoid division by zero if there are no workers
+        if not self.worker_ids:
+            return wage_transactions
+            
         wage_per_worker = total_payout / len(self.worker_ids)
 
         # Distribute wages
         for worker_id in self.worker_ids:
             households_dict[worker_id].balance += wage_per_worker
+            wage_transactions.append({
+                'type': 'wage',
+                'from_id': self.id,
+                'to_id': worker_id,
+                'amount': wage_per_worker
+            })
 
         # Update the firm's balance after paying wages
         self.balance -= total_payout
+        
+        return wage_transactions
 
 #======================================
 # SIMULATION ENGINE
@@ -172,6 +189,7 @@ class Simulation:
                 amount = purchased_qty * chosen_firm.price
                 chosen_firm.receive_payment(amount)
                 transactions_this_tick.append({
+                    'type': 'spending',
                     'from_id': hh.id,
                     'to_id': chosen_firm.id,
                     'amount': amount
@@ -181,6 +199,7 @@ class Simulation:
         # 2. Payday Phase
         logger.debug("Start Payday Phase")
         for f in self.firms.values():
-            f.pay_workers(self.households)
+            wage_transactions = f.pay_workers(self.households)
+            transactions_this_tick.extend(wage_transactions) # Add wage payments to the list
             
         return transactions_this_tick

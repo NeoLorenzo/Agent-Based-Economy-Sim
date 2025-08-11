@@ -31,4 +31,5 @@ PARTICLE_SPEED = 4      # Speed of money particles in pixels per frame
 COLOR_BACKGROUND = (25, 25, 25)
 COLOR_HOUSEHOLD = (173, 216, 230) # Light Blue
 COLOR_FIRM = (255, 182, 193)      # Light Pink
-COLOR_MONEY = (255, 255, 0)       # Yellow
+COLOR_MONEY = (255, 255, 0)       # Yellow for spending
+COLOR_WAGE = (0, 255, 0)          # Green for wages
