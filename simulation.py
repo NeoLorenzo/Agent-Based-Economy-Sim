@@ -2,6 +2,7 @@
 
 import random
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +86,10 @@ class Firm:
 
 class Simulation:
     """Manages the overall simulation state and tick loop."""
-    def __init__(self, config):
+    def __init__(self, config, firm_positions=None, household_positions=None):
         self.config = config
+        self.firm_positions = firm_positions
+        self.household_positions = household_positions
         self.households = {} # Use a dictionary for easy lookup by ID
         self.firms = {}      # Use a dictionary for easy lookup by ID
         self._setup_world()
@@ -115,6 +118,28 @@ class Simulation:
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")
 
+    def _get_closest_firm(self, household_id):
+        """Finds the firm geographically closest to a given household."""
+        if not self.firm_positions or not self.household_positions:
+            return None # Should not happen if configured correctly
+
+        hh_pos = self.household_positions[household_id]
+        closest_firm = None
+        min_dist_sq = float('inf')
+
+        for firm_id, firm_pos in self.firm_positions.items():
+            dist_sq = (hh_pos[0] - firm_pos[0])**2 + (hh_pos[1] - firm_pos[1])**2
+            if dist_sq < min_dist_sq:
+                min_dist_sq = dist_sq
+                closest_firm = self.firms[firm_id]
+        
+        if closest_firm:
+            logger.debug(
+                "Household %d evaluating firms... Found closest: Firm %d (Distance: %.1f)",
+                household_id, closest_firm.id, math.sqrt(min_dist_sq)
+            )
+        return closest_firm
+
     def run_one_tick(self):
         """
         Executes one full cycle of the simulation loop.
@@ -126,7 +151,17 @@ class Simulation:
         # 1. Shopping Phase
         logger.debug("Start Shopping Phase")
         for hh in self.households.values():
-            chosen_firm = random.choice(firm_list)
+            chosen_firm = None
+            if self.config.get('enable_proximity_choice', False):
+                chosen_firm = self._get_closest_firm(hh.id)
+            else:
+                # Fallback to original random choice behavior
+                chosen_firm = random.choice(firm_list)
+
+            if not chosen_firm:
+                logger.warning("Household %d could not choose a firm. Skipping.", hh.id)
+                continue
+
             purchased_qty = hh.place_order_and_pay(
                 price=chosen_firm.price,
                 food_per_person=self.config['food_per_person']

@@ -7,6 +7,7 @@
   "food_per_person": 1,
   "M0": 40000,
   "seed": 42,
+  "enable_proximity_choice": true,
   "logging": {
     "version": 1,
     "disable_existing_loggers": false,

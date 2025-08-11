@@ -121,10 +121,15 @@ def main():
     np.random.seed(master_seed)
     logger.info("RNGs seeded with master seed: %d", master_seed)
     
-    sim = Simulation(config)
+    # Calculate static agent positions once before creating the simulation object
+    # This requires a temporary instance of the simulation to know agent counts,
+    # which is slightly inefficient but clean. A future refactor could address this.
+    temp_sim = Simulation(config)
+    firm_positions, household_positions = calculate_agent_positions(temp_sim)
+    del temp_sim # clean up temporary object
 
-    # Calculate static agent positions once
-    firm_positions, household_positions = calculate_agent_positions(sim)
+    # Now, create the final simulation object with the position data
+    sim = Simulation(config, firm_positions, household_positions)
     
     active_particles = []
     tick_counter = 0
