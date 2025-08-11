@@ -6,8 +6,10 @@ import sys
 import random
 import math
 import numpy as np
+import logging
 from simulation import Simulation
 import constants as C
+import logging_setup
 
 #======================================
 # PARTICLE CLASS for Animation
@@ -100,6 +102,11 @@ def draw_agents(surface, agent_positions, color):
 #======================================
 def main():
     # --- Initialization ---
+    context_filter = logging_setup.setup_logging()
+    logger = logging.getLogger(__name__)
+    
+    logger.info("Application starting...")
+    
     pygame.init()
     screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
     pygame.display.set_caption("Agent-Based Economy Simulation")
@@ -109,11 +116,10 @@ def main():
         config = json.load(f)
 
     # --- Seeding (Rule 12) ---
-    # Initialize all random number generators with the master seed to ensure
-    # that the simulation is deterministic and reproducible.
     master_seed = config['seed']
     random.seed(master_seed)
     np.random.seed(master_seed)
+    logger.info("RNGs seeded with master seed: %d", master_seed)
     
     sim = Simulation(config)
 
@@ -121,47 +127,54 @@ def main():
     firm_positions, household_positions = calculate_agent_positions(sim)
     
     active_particles = []
+    tick_counter = 0
 
     # --- MAIN LOOP ---
     running = True
-    while running:
-        # --- Event Handling ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                running = False
-
-        # --- Simulation Step ---
-        # Run one tick and get the list of financial transactions
-        transactions = sim.run_one_tick()
-        
-        # Create new particles for each transaction
-        for trans in transactions:
-            start_pos = household_positions.get(trans['from_id'])
-            end_pos = firm_positions.get(trans['to_id'])
-            if start_pos and end_pos:
-                active_particles.append(Particle(start_pos, end_pos))
-
-        # --- Update and Draw ---
-        screen.fill(C.COLOR_BACKGROUND)
-        
-        # Draw static agents
-        draw_agents(screen, firm_positions, C.COLOR_FIRM)
-        draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
-        
-        # Update and draw all active particles
-        for particle in active_particles:
-            particle.update()
-            particle.draw(screen)
+    try:
+        logger.info("Starting main simulation loop...")
+        while running:
+            context_filter.tick = tick_counter
             
-        # Remove particles that have finished their journey
-        active_particles = [p for p in active_particles if not p.finished]
-        
-        pygame.display.flip()
-        clock.tick(C.FPS)
+            # --- Event Handling ---
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    running = False
 
-    # --- Shutdown ---
-    pygame.quit()
-    sys.exit()
+            # --- Simulation Step ---
+            logger.debug("Running simulation tick %d", tick_counter)
+            transactions = sim.run_one_tick()
+            
+            # Create new particles for each transaction
+            for trans in transactions:
+                start_pos = household_positions.get(trans['from_id'])
+                end_pos = firm_positions.get(trans['to_id'])
+                if start_pos and end_pos:
+                    active_particles.append(Particle(start_pos, end_pos))
+
+            # --- Update and Draw ---
+            screen.fill(C.COLOR_BACKGROUND)
+            
+            draw_agents(screen, firm_positions, C.COLOR_FIRM)
+            draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
+            
+            for particle in active_particles:
+                particle.update()
+                particle.draw(screen)
+                
+            active_particles = [p for p in active_particles if not p.finished]
+            
+            pygame.display.flip()
+            clock.tick(C.FPS)
+            tick_counter += 1
+            
+    except Exception as e:
+        logger.critical("Unhandled exception in main loop, shutting down.", exc_info=True)
+    finally:
+        # --- Shutdown ---
+        logger.info("Simulation loop ended. Shutting down.")
+        pygame.quit()
+        sys.exit()
 
 if __name__ == "__main__":
     main()

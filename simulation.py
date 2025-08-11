@@ -1,6 +1,9 @@
 # simulation.py
 
 import random
+import logging
+
+logger = logging.getLogger(__name__)
 
 #======================================
 # AGENT DEFINITIONS
@@ -90,9 +93,11 @@ class Simulation:
 
     def _setup_world(self):
         """Initializes all households and firms based on the config file."""
+        logger.info("Setting up the simulation world...")
         # Create Firms
         for i in range(self.config['N_F']):
             self.firms[i] = Firm(id=i, price=self.config['p'], wage_rate=self.config['wage_rate'])
+        logger.debug("Created %d firms.", self.config['N_F'])
 
         # Get a list of firm IDs to assign workers to
         firm_ids = list(self.firms.keys())
@@ -107,6 +112,8 @@ class Simulation:
             employer_firm_id = random.choice(firm_ids)
             self.households[i].employer_id = employer_firm_id
             self.firms[employer_firm_id].add_worker(i)
+        logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
+        logger.info("World setup complete.")
 
     def run_one_tick(self):
         """
@@ -117,6 +124,7 @@ class Simulation:
         transactions_this_tick = []
 
         # 1. Shopping Phase
+        logger.debug("Start Shopping Phase")
         for hh in self.households.values():
             chosen_firm = random.choice(firm_list)
             purchased_qty = hh.place_order_and_pay(
@@ -133,8 +141,10 @@ class Simulation:
                     'to_id': chosen_firm.id,
                     'amount': amount
                 })
+                logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f", hh.id, chosen_firm.id, amount)
 
         # 2. Payday Phase
+        logger.debug("Start Payday Phase")
         for f in self.firms.values():
             f.pay_workers(self.households)
             
