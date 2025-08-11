@@ -107,6 +107,14 @@ def main():
     
     with open('config.json', 'r') as f:
         config = json.load(f)
+
+    # --- Seeding (Rule 12) ---
+    # Initialize all random number generators with the master seed to ensure
+    # that the simulation is deterministic and reproducible.
+    master_seed = config['seed']
+    random.seed(master_seed)
+    np.random.seed(master_seed)
+    
     sim = Simulation(config)
 
     # Calculate static agent positions once
