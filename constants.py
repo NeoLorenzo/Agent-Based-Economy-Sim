@@ -24,8 +24,8 @@ FPS = 60  # Frames per second for the visualization
 # --- Layout and Sizing ---
 SCREEN_PADDING = 50     # Minimum distance of agents from the screen edges
 AGENT_RADIUS = 5        # Visual radius of Firm and Household agents
-PARTICLE_RADIUS = 2     # Visual radius of money particles
-PARTICLE_SPEED = 4      # Speed of money particles in pixels per frame
+PARTICLE_RADIUS = 1     # Visual radius of money particles
+PARTICLE_SPEED = 10      # Speed of money particles in pixels per frame
 
 # --- Colors ---
 COLOR_BACKGROUND = (25, 25, 25)
