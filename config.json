@@ -6,5 +6,38 @@
   "household_size": 4,
   "food_per_person": 1,
   "M0": 40000,
-  "seed": 42
+  "seed": 42,
+  "logging": {
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+      "detailed": {
+        "format": "%(asctime)s - %(levelname)-8s - %(name)-15s - Tick:%(tick)-5d - %(message)s"
+      }
+    },
+    "handlers": {
+      "console": {
+        "class": "logging.StreamHandler",
+        "level": "INFO",
+        "formatter": "detailed",
+        "stream": "ext://sys.stdout"
+      },
+      "file": {
+        "class": "logging.handlers.RotatingFileHandler",
+        "level": "DEBUG",
+        "formatter": "detailed",
+        "filename": "placeholder.log",
+        "maxBytes": 10485760,
+        "backupCount": 5,
+        "encoding": "utf8"
+      }
+    },
+    "root": {
+      "level": "DEBUG",
+      "handlers": [
+        "console",
+        "file"
+      ]
+    }
+  }
 }

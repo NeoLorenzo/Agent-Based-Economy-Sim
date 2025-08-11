@@ -39,3 +39,7 @@ venv.bak/
 # IDE / Editor specific
 .vscode/
 .idea/
+
+# Simulation Output
+###################
+runs/
