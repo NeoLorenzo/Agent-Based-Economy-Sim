@@ -24,11 +24,12 @@ The simulation is built upon several key principles:
 *   `simulation.py`: Contains the core simulation logic, including the `Household` and `Firm` agent classes and the main `Simulation` engine that manages the world state.
 *   `constants.py`: Defines static, framework-level constants (Rule 1.1).
 *   `config.json`: Defines the parameters for a specific economic experiment (Rule 1.2).
+*   `logging_setup.py`: Configures the application's logging system at startup, creating unique run directories and injecting contextual data into log messages as required by Rule 2.
 *   `README.md`: This file, providing an overview and documentation of the project.
 
 ## How to Run
 
-1.  Ensure Python (I use version 3.11.9) and the `pygame` library are installed.
+1.  Ensure Python (I use version 3.11.9) and the required libraries (`pygame`, `numpy`) are installed.
 2.  Modify the `config.json` file to set the desired parameters for the simulation run.
 3.  Execute the main script from your terminal:
     ```bash
@@ -40,8 +41,9 @@ The simulation is built upon several key principles:
 The current version of the simulation is a minimal viable product (MVP) designed to establish the foundational code structure. The economic model is intentionally simplistic and relies on several major abstractions that will be replaced in future iterations.
 
 1.  **Market Mechanism:**
-    *   **Abstraction:** In each tick, households choose a firm to purchase from completely at random.
-    *   **Limitation:** This model does not include any concept of price comparison, firm reputation, product differentiation, or geographic locality. Households are not rational in their purchasing decisions.
+    *   **Abstraction:** In each tick, households choose which firm to purchase from based on geographic proximity. The simulation calculates the closest firm to each household, and the household shops there exclusively. This introduces a basic, yet realistic, constraint to consumer choice.
+    *   **Configuration:** This behavior is controlled by the `enable_proximity_choice` flag in `config.json`. If set to `false`, the simulation reverts to the legacy model where households choose a firm completely at random.
+    *   **Limitation:** While more realistic than random choice, this model still lacks more advanced decision-making factors like price comparison, firm reputation, or product differentiation.
 
 2.  **Labor Market:**
     *   **Abstraction:** At the start of the simulation, each household is assigned to a single firm as its permanent employer.
