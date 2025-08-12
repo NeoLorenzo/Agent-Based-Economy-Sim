@@ -9,6 +9,8 @@ import math
 import numpy as np
 import logging
 import collections
+import os
+import matplotlib.pyplot as plt
 from simulation import Simulation
 import constants as C
 import logging_setup
@@ -221,12 +223,55 @@ def draw_graph(surface, graph_data, config, font):
         pygame.draw.rect(surface, color, (legend_start_x, item_y, 10, 10))
         surface.blit(text_surface, (legend_start_x + 15, item_y - 2))
 
+def display_inventory_graph(graph_data):
+    """
+    Displays the firm inventory history in a Matplotlib window.
+    The plot is styled to closely match the in-sim graph.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Displaying final inventory graph...")
+
+    # Helper to convert Pygame RGB (0-255) to Matplotlib float (0-1)
+    to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8, 6)) # Create a figure and an axes
+
+    # Plot each firm's data
+    for i, (firm_id, history) in enumerate(graph_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+
+    # --- Style the plot to match the simulation ---
+    ax.set_title("Firm Inventory", fontsize=14)
+    ax.set_xlabel("Tick", fontsize=10)
+    ax.set_ylabel("Inventory", fontsize=10)
+    ax.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax.legend()
+    
+    # Set axis and tick colors
+    axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
+    tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
+    ax.spines['top'].set_color(axis_color)
+    ax.spines['bottom'].set_color(axis_color)
+    ax.spines['left'].set_color(axis_color)
+    ax.spines['right'].set_color(axis_color)
+    ax.tick_params(axis='x', colors=tick_color)
+    ax.tick_params(axis='y', colors=tick_color)
+
+    # --- Display the plot ---
+    try:
+        plt.show()
+    except Exception as e:
+        logger.error("Failed to display Matplotlib graph.", exc_info=True)
+
 #======================================
 # MAIN APPLICATION
 #======================================
 def main():
     # --- Initialization ---
-    context_filter = logging_setup.setup_logging()
+    context_filter, run_dir = logging_setup.setup_logging()
     logger = logging.getLogger(__name__)
     
     logger.info("Application starting...")
@@ -340,6 +385,7 @@ def main():
     finally:
         # --- Shutdown ---
         logger.info("Simulation loop ended. Shutting down.")
+        display_inventory_graph(graph_data)
         pygame.quit()
         sys.exit()
 

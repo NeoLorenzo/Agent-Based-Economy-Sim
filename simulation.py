@@ -83,8 +83,8 @@ class Firm:
         if not self.worker_ids:
             return wage_transactions # No workers to pay
 
-        # Calculate the total amount to be paid as wages
-        total_payout = self.balance * self.wage_rate
+        # Calculate the total amount to be paid as wages based on this tick's revenue
+        total_payout = self.revenue_this_tick * self.wage_rate
         
         # Avoid division by zero if there are no workers
         if not self.worker_ids:

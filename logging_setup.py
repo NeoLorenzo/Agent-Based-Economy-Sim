@@ -58,4 +58,4 @@ def setup_logging(config_path='config.json'):
 
     logging.info("Logging configured. Log files will be saved to: %s", run_dir)
     
-    return context_filter
+    return context_filter, run_dir
