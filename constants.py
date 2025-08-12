@@ -25,7 +25,7 @@ FPS = 60  # Frames per second for the visualization
 SCREEN_PADDING = 50     # Minimum distance of agents from the screen edges
 AGENT_RADIUS = 5        # Visual radius of Firm and Household agents
 PARTICLE_RADIUS = 1     # Visual radius of money particles
-PARTICLE_DURATION = 30  # Duration of particle travel in frames (e.g., 30 frames = 0.5s at 60 FPS)
+PARTICLE_DURATION = 60  # Duration of particle travel in frames (e.g., 30 frames = 0.5s at 60 FPS)
 
 # --- Colors ---
 COLOR_BACKGROUND = (30, 35, 40)         # Dark Slate Grey

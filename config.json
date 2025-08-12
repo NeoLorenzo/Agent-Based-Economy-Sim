@@ -7,6 +7,7 @@
   "food_per_person": 1,
   "M0": 40000,
   "seed": 42,
+  "ticks_per_second": 1,
   "enable_proximity_choice": true,
   "logging": {
     "version": 1,

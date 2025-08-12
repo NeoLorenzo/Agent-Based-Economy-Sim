@@ -155,31 +155,42 @@ def main():
 
     # --- MAIN LOOP ---
     running = True
+    time_per_tick = 1000.0 / config['ticks_per_second'] # Time in ms for one tick
+    time_since_last_tick = 0.0
+    
     try:
         logger.info("Starting main simulation loop...")
         while running:
-            context_filter.tick = tick_counter
-            
             # --- Event Handling ---
             for event in pygame.event.get():
                 if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                     running = False
 
-            # --- Simulation Step ---
-            logger.debug("Running simulation tick %d", tick_counter)
-            transactions = sim.run_one_tick()
-            
-            # Create new particles for each transaction
-            for trans in transactions:
-                # Determine if it's a payment from a household to a firm, or a wage from a firm to a household
-                start_pos = household_positions.get(trans['from_id'], firm_positions.get(trans['from_id']))
-                end_pos = firm_positions.get(trans['to_id'], household_positions.get(trans['to_id']))
-                
-                if start_pos and end_pos:
-                    color = C.COLOR_MONEY if trans['type'] == 'spending' else C.COLOR_WAGE
-                    active_particles.append(Particle(start_pos, end_pos, color))
+            # --- Time Management ---
+            # Get time in milliseconds since the last frame
+            delta_time = clock.tick(C.FPS)
+            time_since_last_tick += delta_time
 
-            # --- Update and Draw ---
+            # --- Simulation Step (run if enough time has passed) ---
+            if time_since_last_tick >= time_per_tick:
+                time_since_last_tick -= time_per_tick # Decrement accumulator
+                
+                context_filter.tick = tick_counter
+                logger.debug("Running simulation tick %d", tick_counter)
+                transactions = sim.run_one_tick()
+                
+                # Create new particles for each transaction
+                for trans in transactions:
+                    start_pos = household_positions.get(trans['from_id'], firm_positions.get(trans['from_id']))
+                    end_pos = firm_positions.get(trans['to_id'], household_positions.get(trans['to_id']))
+                    
+                    if start_pos and end_pos:
+                        color = C.COLOR_MONEY if trans['type'] == 'spending' else C.COLOR_WAGE
+                        active_particles.append(Particle(start_pos, end_pos, color))
+                
+                tick_counter += 1
+
+            # --- Update and Draw (run every frame for smooth animation) ---
             screen.fill(C.COLOR_BACKGROUND)
             
             # Update and draw particles first, so they appear underneath the agents
@@ -194,8 +205,6 @@ def main():
             active_particles = [p for p in active_particles if not p.finished]
             
             pygame.display.flip()
-            clock.tick(C.FPS)
-            tick_counter += 1
             
     except Exception as e:
         logger.critical("Unhandled exception in main loop, shutting down.", exc_info=True)
