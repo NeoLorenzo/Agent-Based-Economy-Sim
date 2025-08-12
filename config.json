@@ -13,6 +13,7 @@
   "seed": 42,
   "ticks_per_second": 5,
   "enable_proximity_choice": true,
+  "shopping_firms_to_consider": 3,
   "logging": {
     "version": 1,
     "disable_existing_loggers": false,

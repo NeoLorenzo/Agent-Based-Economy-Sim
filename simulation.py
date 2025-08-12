@@ -82,6 +82,11 @@ class Simulation:
         """
         Finds the closest firm for all households in a single vectorized operation.
         This is significantly faster than looping through each household.
+        
+        NOTE: This method is no longer called in the main shopping logic when
+        price-sensitive choice is enabled, but is kept for potential future use
+        or alternative simulation modes. The new logic is integrated directly
+        into `run_one_tick` for clarity.
         """
         # Use broadcasting to calculate squared distances between all households and all firms
         # household_pos_array is (N_H, 2) -> (N_H, 1, 2)
@@ -109,10 +114,34 @@ class Simulation:
         
         # --- Determine which firm each household will shop at (Vectorized) ---
         if self.config.get('enable_proximity_choice', False):
-            chosen_firm_ids = self._vectorized_find_closest_firms()
+            # Households consider a few of the closest firms, then choose the cheapest among them.
+            # This models realistic shopping behavior where consumers balance convenience and price.
+            
+            # 1. Calculate squared distances from every household to every firm.
+            diffs = self.household_pos_array[:, np.newaxis, :] - self.firm_pos_array[np.newaxis, :, :]
+            dist_sq = np.sum(diffs**2, axis=2) # Shape: (N_H, N_F)
+            
+            # 2. Get the indices of the N closest firms for each household.
+            # `np.argsort` gives us the indices that would sort the array.
+            closest_firm_indices = np.argsort(dist_sq, axis=1)
+            
+            # 3. Limit the choice to the N closest firms specified in the config.
+            n_to_consider = self.config.get('shopping_firms_to_consider', 1)
+            candidate_indices = closest_firm_indices[:, :n_to_consider] # Shape: (N_H, n_to_consider)
+            
+            # 4. Get the prices of these candidate firms.
+            candidate_prices = self.firms['price'][candidate_indices] # Shape: (N_H, n_to_consider)
+            
+            # 5. Find the index of the minimum price *within the candidates*.
+            # This gives us an index from 0 to n_to_consider-1 for each household.
+            cheapest_candidate_idx = np.argmin(candidate_prices, axis=1) # Shape: (N_H,)
+            
+            # 6. Use the index from step 5 to select the final firm ID from our candidate list.
+            # This is the core of the advanced indexing to get the final result.
+            chosen_firm_ids = candidate_indices[np.arange(self.config['N_H']), cheapest_candidate_idx]
+
         else:
-            # Reverting to `random.choice` in a loop to ensure deterministic
-            # behavior identical to the original implementation.
+            # Fallback to simple random choice if proximity is disabled.
             firm_ids_list = list(range(self.config['N_F']))
             chosen_firm_ids = np.array([random.choice(firm_ids_list) for _ in range(self.config['N_H'])])
         
