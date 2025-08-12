@@ -194,9 +194,18 @@ def main():
             if time_since_last_tick >= time_per_tick:
                 time_since_last_tick -= time_per_tick
                 context_filter.tick = tick_counter
-                logger.debug("Running simulation tick %d", tick_counter)
                 
-                transactions = sim.run_one_tick()
+                transactions, summary = sim.run_one_tick()
+                logger.info(
+                    "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units)",
+                    tick_counter,
+                    summary['total_sales_volume'],
+                    summary['total_sales_units'],
+                    summary['total_wages_paid'],
+                    summary['total_restock_cost'],
+                    summary['total_restock_units']
+                )
+
                 update_graph_data(inventory_graph_data, sim)
                 update_price_graph_data(price_graph_data, sim)
                 update_capital_graph_data(capital_graph_data, sim)

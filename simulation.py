@@ -108,40 +108,35 @@ class Simulation:
     def run_one_tick(self):
         """
         Executes one full cycle of the simulation using vectorized operations.
-        Returns a list of transactions that occurred.
+        Returns a list of transactions for visualization and a summary for logging.
         """
         transactions_this_tick = []
+        tick_summary = {
+            'total_restock_cost': 0.0,
+            'total_restock_units': 0,
+            'total_sales_volume': 0.0,
+            'total_sales_units': 0,
+            'total_wages_paid': 0.0
+        }
 
         # 1. Wholesale Restocking Phase (Vectorized)
         logger.debug("Start Wholesale Restocking Phase")
         wholesale_price = self.config['wholesale_price']
         
-        # Determine how much inventory each firm needs to order
         needed_quantity = self.firms['target_inventory'] - self.firms['inventory']
-        needed_quantity[needed_quantity < 0] = 0 # Can't need negative inventory
+        needed_quantity[needed_quantity < 0] = 0
         
-        # Determine how much each firm can afford to order
         affordable_quantity = (self.firms['balance'] / wholesale_price).astype(int)
         
-        # The actual quantity ordered is the minimum of what's needed and what's affordable
         ordered_quantity = np.minimum(needed_quantity, affordable_quantity)
         
-        # Calculate the cost and update balances and inventory
         order_cost = ordered_quantity * wholesale_price
         self.firms['balance'] -= order_cost
         self.firms['inventory'] += ordered_quantity
         
-        # Log the restocking events
-        for firm_id, quantity in enumerate(ordered_quantity):
-            if quantity > 0:
-                logger.info(
-                    "Firm %d restocking. Target: %d, Current: %d, Ordered: %d, Cost: %.2f",
-                    firm_id,
-                    self.firms['target_inventory'][firm_id],
-                    self.firms['inventory'][firm_id] - quantity, # Log inventory before restock
-                    quantity,
-                    order_cost[firm_id]
-                )
+        # Aggregate restocking data for the summary
+        tick_summary['total_restock_units'] = np.sum(ordered_quantity)
+        tick_summary['total_restock_cost'] = np.sum(order_cost)
 
         # 2. Shopping Phase
         logger.debug("Start Shopping Phase")
@@ -207,10 +202,13 @@ class Simulation:
             self.firms['inventory'][firm_id] -= sold_quantity
             self.firms['revenue_this_tick'][firm_id] += amount
             
+            # Aggregate sales data
+            tick_summary['total_sales_units'] += sold_quantity
+            tick_summary['total_sales_volume'] += amount
+
             transactions_this_tick.append({
                 'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount
             })
-            logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f, Qty: %d", hh_id, firm_id, amount, sold_quantity)
 
         # 3. Payday Phase (Vectorized)
         logger.debug("Start Payday Phase")
@@ -240,27 +238,26 @@ class Simulation:
                     transactions_this_tick.append({
                         'type': 'wage', 'from_id': firm_id, 'to_id': int(worker_id), 'amount': individual_wage
                     })
+        
+        # Aggregate wage data
+        tick_summary['total_wages_paid'] = np.sum(total_payout)
 
         # 4. Firm Adjustment Phase (e.g., Price Changes)
         logger.debug("Start Firm Adjustment Phase")
         
-        # Define inventory thresholds based on production capacity
         upper_threshold = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
         lower_threshold = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
         
-        # Vectorized conditions for price changes
         should_raise_price = self.firms['inventory'] < lower_threshold
         should_lower_price = self.firms['inventory'] > upper_threshold
         
-        # Store old prices for logging
         old_prices = self.firms['price'].copy()
         
-        # Apply price adjustments
         adj_rate = self.config['price_adjustment_rate']
         self.firms['price'][should_raise_price] *= (1 + adj_rate)
         self.firms['price'][should_lower_price] *= (1 - adj_rate)
         
-        # Log changes where prices were actually modified
+        # Price change logging is INFO level and reports on state changes, which is acceptable.
         for firm_id in range(self.config['N_F']):
             if old_prices[firm_id] != self.firms['price'][firm_id]:
                 logger.info(
@@ -271,4 +268,4 @@ class Simulation:
                     self.firms['inventory'][firm_id]
                 )
             
-        return transactions_this_tick
+        return transactions_this_tick, tick_summary
