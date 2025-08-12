@@ -17,7 +17,7 @@ import visualization as viz # Import the new module
 #======================================
 # HELPER FUNCTIONS (Application Logic)
 #======================================
-def calculate_agent_positions(num_firms, num_households):
+def calculate_agent_positions(num_firms, num_households, num_banks):
     """
     Calculates non-overlapping screen positions for agents.
 
@@ -28,19 +28,22 @@ def calculate_agent_positions(num_firms, num_households):
     Args:
         num_firms (int): The number of firms to generate positions for.
         num_households (int): The number of households to generate positions for.
+        num_banks (int): The number of banks to generate positions for.
 
     Returns:
-        tuple[dict, dict]: A tuple containing two dictionaries:
+        tuple[dict, dict, dict]: A tuple containing three dictionaries:
             - firm_positions (dict[int, tuple[int, int]]): Firm IDs mapped to (x, y) coordinates.
             - hh_positions (dict[int, tuple[int, int]]): Household IDs mapped to (x, y) coordinates.
+            - bank_positions (dict[int, tuple[int, int]]): Bank IDs mapped to (x, y) coordinates.
 
     Side Effects:
         Consumes values from the `numpy.random` generator.
     """
     firm_positions = {}
     hh_positions = {}
+    bank_positions = {}
     
-    total_agents = num_firms + num_households
+    total_agents = num_firms + num_households + num_banks
 
     min_dist = 5 * (C.AGENT_RADIUS + C.AGENT_OUTLINE_WIDTH)
     min_dist_sq = min_dist ** 2
@@ -78,8 +81,14 @@ def calculate_agent_positions(num_firms, num_households):
         household_id = household_ids[i]
         position = generated_positions.pop()
         hh_positions[household_id] = position
+
+    bank_ids = list(range(num_banks))
+    for i in range(num_banks):
+        bank_id = bank_ids[i]
+        position = generated_positions.pop()
+        bank_positions[bank_id] = position
         
-    return firm_positions, hh_positions
+    return firm_positions, hh_positions, bank_positions
 
 def display_final_graphs(inventory_data, price_data, capital_data, employee_data, wage_data):
     """
@@ -184,11 +193,11 @@ def main():
     np.random.seed(master_seed)
     logger.info("RNGs seeded with master seed: %d", master_seed)
     
-    firm_positions, household_positions = calculate_agent_positions(
-        config['N_F'], config['N_H']
+    firm_positions, household_positions, bank_positions = calculate_agent_positions(
+        config['N_F'], config['N_H'], config.get('N_B', 0)
     )
 
-    sim = Simulation(config, firm_positions, household_positions)
+    sim = Simulation(config, firm_positions, household_positions, bank_positions)
     
     inventory_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     price_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
@@ -253,6 +262,7 @@ def main():
             
             viz.draw_agent_shadows(screen, firm_positions)
             viz.draw_agent_shadows(screen, household_positions)
+            viz.draw_agent_shadows(screen, bank_positions)
             
             for particle in active_particles:
                 particle.update()
@@ -260,6 +270,7 @@ def main():
             
             viz.draw_agent_bodies(screen, firm_positions, C.COLOR_FIRM)
             viz.draw_agent_bodies(screen, household_positions, C.COLOR_HOUSEHOLD)
+            viz.draw_agent_bodies(screen, bank_positions, C.COLOR_BANK)
                 
             active_particles = [p for p in active_particles if not p.finished]
             

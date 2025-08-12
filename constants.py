@@ -33,6 +33,7 @@ SHADOW_OFFSET = 5       # The pixel offset for the agent drop shadow
 COLOR_BACKGROUND = (30, 35, 40)         # Dark Slate Grey
 COLOR_HOUSEHOLD = (100, 180, 255)       # Sky Blue
 COLOR_FIRM = (255, 160, 170)            # Calm Pink
+COLOR_BANK = (220, 220, 220)            # Silver/Light Grey
 COLOR_MONEY = (255, 225, 0)             # Gold
 COLOR_WAGE = (80, 220, 120)             # Sea Green
 COLOR_OUTLINE = (255, 255, 255)         # White

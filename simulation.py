@@ -16,15 +16,17 @@ class Simulation:
     Manages the overall simulation state and tick loop using NumPy for performance.
     Agent data is stored in structured NumPy arrays rather than individual objects.
     """
-    def __init__(self, config, firm_positions=None, household_positions=None):
+    def __init__(self, config, firm_positions=None, household_positions=None, bank_positions=None):
         self.config = config
         
         # Convert position dicts to NumPy arrays for vectorized calculations
         self.firm_pos_array = np.array(list(firm_positions.values()))
         self.household_pos_array = np.array(list(household_positions.values()))
+        self.bank_pos_array = np.array(list(bank_positions.values()))
         
         self.households = None # Will be a NumPy structured array
         self.firms = None      # Will be a NumPy structured array
+        self.banks = None      # Will be a NumPy structured array
         self._setup_world()
 
     def _setup_world(self):
@@ -34,6 +36,7 @@ class Simulation:
         # --- Define data structure for Firms ---
         firm_dtype = [
             ('balance', 'f8'),
+            ('debt', 'f8'),
             ('price', 'f8'),
             ('wage_rate', 'f8'),
             ('production_per_tick', 'i4'),
@@ -80,6 +83,12 @@ class Simulation:
         # This is an initial target; their actual hiring will be constrained by revenue.
         initial_target_workers = math.ceil(self.config['N_H'] / self.config['N_F'])
         self.firms['target_num_workers'] = initial_target_workers
+        
+        # --- Define data structure for Banks ---
+        bank_dtype = [('balance', 'f8')]
+        self.banks = np.zeros(self.config.get('N_B', 0), dtype=bank_dtype)
+        # The bank has infinite capital for now; we represent this with a very large number.
+        self.banks['balance'] = 1e12 
         
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")
@@ -386,5 +395,38 @@ class Simulation:
                     num_increased,
                     num_decreased
                 )
+
+        # 6. Banking Phase (Loans)
+        # Firms check if they need a loan to survive the near future.
+        if self.config.get('N_B', 0) > 0:
+            logger.debug("Start Banking Phase")
+            
+            # Estimate expenses for the next N ticks (currently just wages)
+            lookahead_ticks = self.config['loan_trigger_lookahead_ticks']
+            estimated_future_expenses = (self.firms['num_workers'] * self.firms['wage_rate']) * lookahead_ticks
+            
+            # Identify firms whose balance is less than their estimated future expenses
+            firms_needing_loan_mask = (self.firms['balance'] < estimated_future_expenses) & (self.firms['balance'] > 0)
+            firms_needing_loan_indices = np.where(firms_needing_loan_mask)[0]
+
+            if len(firms_needing_loan_indices) > 0:
+                loan_multiplier = self.config['loan_amount_multiplier']
+                
+                for firm_id in firms_needing_loan_indices:
+                    # Loan is double the projected expenses
+                    loan_amount = estimated_future_expenses[firm_id] * loan_multiplier
+                    
+                    # Update firm balance and debt
+                    self.firms['balance'][firm_id] += loan_amount
+                    self.firms['debt'][firm_id] += loan_amount
+                    
+                    # For now, the bank's balance is effectively infinite, so we don't decrement it.
+                    
+                    logger.info(
+                        "Firm %d took a loan of %.2f. New total debt is %.2f.",
+                        firm_id,
+                        loan_amount,
+                        self.firms['debt'][firm_id]
+                    )
 
         return transactions_this_tick, tick_summary

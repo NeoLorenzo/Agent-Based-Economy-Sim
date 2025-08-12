@@ -1,6 +1,9 @@
 {
   "N_H": 200,
   "N_F": 2,
+  "N_B": 1,
+  "loan_trigger_lookahead_ticks": 10,
+  "loan_amount_multiplier": 2.0,
   "wage_rate": 5.0,
   "enable_dynamic_wages": true,
   "wage_adjustment_sensitivity": 0.1,
