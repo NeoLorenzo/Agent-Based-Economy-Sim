@@ -156,7 +156,7 @@ def draw_agent_bodies(surface, agent_positions, color):
         pygame.gfxdraw.filled_circle(surface, x, y, C.AGENT_RADIUS, color)
 
 def update_graph_data(graph_data, sim):
-    """Appends the current inventory of each firm to the historical data deque."""
+    """Appends the current inventory of each firm to the historical data list."""
     # Access the entire 'inventory' column from the NumPy array
     inventories = sim.firms['inventory']
     # Enumerate through the inventories to get the firm_id (index) and value
@@ -201,18 +201,31 @@ def draw_graph(surface, graph_data, config, font):
     surface.blit(min_y_text, (plot_start_x - min_y_text.get_width() - 5, plot_start_y + plot_area_height - 7))
 
     # 5. Draw each firm's inventory line
-    spacing_x = plot_area_width / (C.GRAPH_MAX_HISTORY - 1) if C.GRAPH_MAX_HISTORY > 1 else 0
-    for i, (firm_id, history) in enumerate(graph_data.items()):
-        color = C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)]
-        if len(history) < 2: continue
+    # Determine the total number of ticks to display on the X-axis.
+    # We find the longest history in case of uneven data, though they should be the same.
+    num_ticks_to_display = 0
+    for history in graph_data.values():
+        num_ticks_to_display = max(num_ticks_to_display, len(history))
 
-        points = []
-        start_offset = C.GRAPH_MAX_HISTORY - len(history)
-        for tick_index, value in enumerate(history):
-            x = plot_start_x + (start_offset + tick_index) * spacing_x
-            y = plot_start_y + plot_area_height * (1 - (value / max_y_val))
-            points.append((x, y))
-        pygame.draw.lines(surface, color, False, points, C.GRAPH_LINE_WIDTH)
+    # Only proceed to draw lines if there's more than one data point.
+    if num_ticks_to_display > 1:
+        # The space between points is the total width divided by the number of intervals.
+        spacing_x = plot_area_width / (num_ticks_to_display - 1)
+        
+        for i, (firm_id, history) in enumerate(graph_data.items()):
+            color = C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)]
+            if len(history) < 2:
+                continue
+
+            # Map each data point in the history to a screen coordinate.
+            points = []
+            for tick_index, value in enumerate(history):
+                x = plot_start_x + tick_index * spacing_x
+                y = plot_start_y + plot_area_height * (1 - (value / max_y_val))
+                points.append((x, y))
+            
+            # Draw the compressed line for the firm's full history.
+            pygame.draw.lines(surface, color, False, points, C.GRAPH_LINE_WIDTH)
 
     # 6. Draw Title and Legend
     title_text = font.render("Firm Inventory", True, C.GRAPH_FONT_COLOR)
@@ -305,7 +318,7 @@ def main():
     # Initialize data structure for the graph
     # We now iterate from 0 to N-1, as sim.firms is a NumPy array.
     graph_data = {
-        firm_id: collections.deque(maxlen=C.GRAPH_MAX_HISTORY)
+        firm_id: []
         for firm_id in range(len(sim.firms))
     }
     

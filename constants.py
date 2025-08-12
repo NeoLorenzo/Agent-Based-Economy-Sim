@@ -51,7 +51,6 @@ GRAPH_X = 20
 GRAPH_Y = 20
 GRAPH_PADDING = 20
 GRAPH_AXIS_LABEL_PADDING = 30 # Space on the left for Y-axis labels
-GRAPH_MAX_HISTORY = 150 # Number of ticks to show on the x-axis
 GRAPH_BG_COLOR = (40, 45, 50)
 GRAPH_AXIS_COLOR = (150, 150, 150)
 GRAPH_FONT_COLOR = (200, 200, 200)
