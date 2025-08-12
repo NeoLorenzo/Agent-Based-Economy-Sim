@@ -1,7 +1,7 @@
 {
   "N_H": 200,
   "N_F": 5,
-  "wage_rate": 0.8,
+  "wage_rate": 5.0,
   "p": 2.0,
   "price_adjustment_rate": 0.01,
   "inventory_upper_threshold_factor": 2.0,

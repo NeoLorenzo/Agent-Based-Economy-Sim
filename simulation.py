@@ -245,8 +245,8 @@ class Simulation:
         # Bank revenue before paying wages
         self.firms['balance'] += self.firms['revenue_this_tick']
         
-        # Calculate total wage payout per firm based on revenue
-        total_payout = self.firms['revenue_this_tick'] * self.firms['wage_rate']
+        # Calculate total wage payout per firm based on a fixed wage per employee
+        total_payout = self.firms['num_workers'] * self.firms['wage_rate']
         
         # Firms pay wages from their balance
         self.firms['balance'] -= total_payout

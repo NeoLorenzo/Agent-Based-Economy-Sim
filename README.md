@@ -46,8 +46,8 @@ The current version of the simulation is a minimal viable product (MVP) designed
     *   **Limitation:** This model is a significant step up from simple proximity or random choice, but it still lacks factors like brand loyalty, product quality differences, or the influence of advertising. All goods are treated as perfect substitutes.
 
 2.  **Labor Market:**
-    *   **Abstraction:** The simulation now features a dynamic labor market. All households start as unemployed. In each tick, firms with sufficient revenue and capital can hire workers from the unemployed pool. Conversely, firms with critically low capital will lay off workers. This creates a fluid workforce where firms compete for labor and households can move between being employed and unemployed.
-    *   **Limitation:** The model does not yet include wage negotiation, skills, or job-seeking behavior from households (they are hired passively). Wages are still determined as a fixed percentage of firm revenue, not by labor supply and demand.
+    *   **Abstraction:** The simulation now features a dynamic labor market with a fixed wage system. All households start as unemployed. Firms can hire workers from the unemployed pool if they have sufficient capital and revenue, and will lay off workers if their capital drops too low. Each employed household receives a fixed, stable wage per tick, defined by the firm's `wage_rate`. This creates a predictable payroll expense for firms and a stable income for households.
+    *   **Limitation:** The model does not yet include wage negotiation, skills, or active job-seeking behavior from households (they are hired passively). The wage rate is static and does not yet respond to labor supply and demand dynamics (i.e., a "tight" or "loose" labor market).
 
 3.  **Firm Restocking & Inventory:**
     *   **Abstraction:** Firms act as retailers. They do not produce goods. Instead, they purchase inventory from an abstract, infinite "wholesale market" at a fixed `wholesale_price`. Each firm attempts to maintain a `target_inventory` level. If its current inventory drops below this target, it orders more goods, limited by its available cash balance.
