@@ -63,6 +63,10 @@ INVENTORY_GRAPH_Y = 20
 PRICE_GRAPH_X = 20
 PRICE_GRAPH_Y = INVENTORY_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
 
+# --- Capital Graph ---
+CAPITAL_GRAPH_X = 20
+CAPITAL_GRAPH_Y = PRICE_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
+
 # A list of distinct colors for the firm graph lines
 GRAPH_LINE_COLORS = [
     (52, 152, 219),  # Peter River

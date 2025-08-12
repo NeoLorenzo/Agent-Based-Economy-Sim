@@ -169,6 +169,12 @@ def update_price_graph_data(price_graph_data, sim):
     for firm_id, price_value in enumerate(prices):
         price_graph_data[firm_id].append(price_value)
 
+def update_capital_graph_data(capital_graph_data, sim):
+    """Appends the current balance of each firm to the historical data list."""
+    balances = sim.firms['balance']
+    for firm_id, balance_value in enumerate(balances):
+        capital_graph_data[firm_id].append(balance_value)
+
 def draw_graph(surface, graph_data, font, x, y, width, height, title):
     """Draws a dynamic, auto-scaling graph with axes, labels, and a legend."""
     # 1. Draw background and border
@@ -246,17 +252,17 @@ def draw_graph(surface, graph_data, font, x, y, width, height, title):
         pygame.draw.rect(surface, color, (legend_start_x, item_y, 10, 10))
         surface.blit(text_surface, (legend_start_x + 15, item_y - 2))
 
-def display_final_graphs(inventory_data, price_data):
+def display_final_graphs(inventory_data, price_data, capital_data):
     """
-    Displays the firm inventory and price history in a Matplotlib window.
+    Displays the firm inventory, price, and capital history in a Matplotlib window.
     The plots are styled to closely match the in-sim graphs.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Displaying final inventory and price graphs...")
+    logger.info("Displaying final inventory, price, and capital graphs...")
 
     to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
     plt.style.use('dark_background')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True) # 2 rows, 1 column
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True) # 3 rows, 1 column
 
     # --- Plot 1: Inventory ---
     for i, (firm_id, history) in enumerate(inventory_data.items()):
@@ -281,8 +287,20 @@ def display_final_graphs(inventory_data, price_data):
     ax2.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
     ax2.legend()
 
+    # --- Plot 3: Capital ---
+    for i, (firm_id, history) in enumerate(capital_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax3.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+
+    ax3.set_title("Firm Capital Over Time", fontsize=14)
+    ax3.set_xlabel("Tick", fontsize=10)
+    ax3.set_ylabel("Capital", fontsize=10)
+    ax3.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax3.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax3.legend()
+
     # --- Style and Show ---
-    for ax in [ax1, ax2]:
+    for ax in [ax1, ax2, ax3]:
         axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
         tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
         ax.spines['top'].set_color(axis_color)
@@ -339,6 +357,9 @@ def main():
     price_graph_data = {
         firm_id: [] for firm_id in range(len(sim.firms))
     }
+    capital_graph_data = {
+        firm_id: [] for firm_id in range(len(sim.firms))
+    }
     
     active_particles = []
     tick_counter = 0
@@ -370,6 +391,7 @@ def main():
                 transactions = sim.run_one_tick()
                 update_graph_data(inventory_graph_data, sim) # Capture inventory state
                 update_price_graph_data(price_graph_data, sim) # Capture price state
+                update_capital_graph_data(capital_graph_data, sim) # Capture capital state
                 
                 # Create new particles for each transaction
                 for trans in transactions:
@@ -399,6 +421,7 @@ def main():
             # Draw the graphs on the left side
             draw_graph(screen, inventory_graph_data, font, C.INVENTORY_GRAPH_X, C.INVENTORY_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Inventory")
             draw_graph(screen, price_graph_data, font, C.PRICE_GRAPH_X, C.PRICE_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Price")
+            draw_graph(screen, capital_graph_data, font, C.CAPITAL_GRAPH_X, C.CAPITAL_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Capital")
             
             # 1. Draw shadows first, so they are under everything else
             draw_agent_shadows(screen, firm_positions)
@@ -422,7 +445,7 @@ def main():
     finally:
         # --- Shutdown ---
         logger.info("Simulation loop ended. Shutting down.")
-        display_final_graphs(inventory_graph_data, price_graph_data)
+        display_final_graphs(inventory_graph_data, price_graph_data, capital_graph_data)
         pygame.quit()
         sys.exit()
 
