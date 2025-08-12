@@ -25,11 +25,15 @@ FPS = 60  # Frames per second for the visualization
 SCREEN_PADDING = 50     # Minimum distance of agents from the screen edges
 AGENT_RADIUS = 5        # Visual radius of Firm and Household agents
 PARTICLE_RADIUS = 1     # Visual radius of money particles
-PARTICLE_SPEED = 10      # Speed of money particles in pixels per frame
+PARTICLE_DURATION = 30  # Duration of particle travel in frames (e.g., 30 frames = 0.5s at 60 FPS)
 
 # --- Colors ---
-COLOR_BACKGROUND = (25, 25, 25)
-COLOR_HOUSEHOLD = (173, 216, 230) # Light Blue
-COLOR_FIRM = (255, 182, 193)      # Light Pink
-COLOR_MONEY = (255, 255, 0)       # Yellow for spending
-COLOR_WAGE = (0, 255, 0)          # Green for wages
+COLOR_BACKGROUND = (30, 35, 40)         # Dark Slate Grey
+COLOR_HOUSEHOLD = (100, 180, 255)       # Sky Blue
+COLOR_FIRM = (255, 160, 170)            # Calm Pink
+COLOR_MONEY = (255, 225, 0)             # Gold
+COLOR_WAGE = (80, 220, 120)             # Sea Green
+COLOR_OUTLINE = (255, 255, 255)         # White
+
+# --- Agent Visuals ---
+AGENT_OUTLINE_WIDTH = 3 # Width of the agent's outline in pixels

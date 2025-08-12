@@ -2,6 +2,7 @@
 
 import json
 import pygame
+import pygame.gfxdraw
 import sys
 import random
 import math
@@ -15,42 +16,47 @@ import logging_setup
 # PARTICLE CLASS for Animation
 #======================================
 class Particle:
-    """Represents an animated particle for visualizing flows."""
+    """Represents an animated particle for visualizing flows with smooth easing."""
     def __init__(self, start_pos, end_pos, color):
         self.start_pos = pygame.math.Vector2(start_pos)
         self.end_pos = pygame.math.Vector2(end_pos)
         self.current_pos = self.start_pos
         self.color = color
-        self.distance_to_travel = (self.end_pos - self.start_pos).length()
-        
-        if self.distance_to_travel > 0:
-            self.direction = (self.end_pos - self.start_pos).normalize()
-        else:
-            self.direction = pygame.math.Vector2(0, 0)
-        
+        self.progress = 0.0  # Animation progress from 0.0 to 1.0
         self.finished = False
 
     def update(self):
-        """Moves the particle closer to its destination without overshooting."""
-        if not self.finished:
-            # Calculate remaining distance to the destination
-            remaining_distance = (self.end_pos - self.current_pos).length()
+        """
+        Moves the particle along its path using an ease-in-out curve.
+        This creates a smooth, natural-looking acceleration and deceleration.
+        """
+        if self.finished:
+            return
 
-            # If the next step is longer than the remaining distance,
-            # just move to the end point. Otherwise, take a normal step.
-            if remaining_distance <= C.PARTICLE_SPEED:
-                self.current_pos = self.end_pos
-                self.finished = True
-            else:
-                self.current_pos += self.direction * C.PARTICLE_SPEED
+        # Increment progress based on a fixed duration
+        self.progress += 1.0 / C.PARTICLE_DURATION
+        
+        if self.progress >= 1.0:
+            self.progress = 1.0
+            self.finished = True
+
+        # Apply a cosine easing function for smooth motion.
+        # This maps a linear progress (0 to 1) to a smooth S-curve.
+        eased_progress = (1 - math.cos(self.progress * math.pi)) / 2
+        
+        # Interpolate the position based on the eased progress
+        self.current_pos = self.start_pos.lerp(self.end_pos, eased_progress)
 
     def draw(self, surface):
-        """Draws the particle on the screen."""
+        """Draws a smooth, anti-aliased particle on the screen."""
         # We draw the particle regardless of its 'finished' state. This allows us
         # to render it one last time at its final destination after the update() call
         # that sets finished = True. It will be removed from the active list
         # immediately after this final draw call, effectively disappearing on the next frame.
-        pygame.draw.circle(surface, self.color, (int(self.current_pos.x), int(self.current_pos.y)), C.PARTICLE_RADIUS)
+        x, y = int(self.current_pos.x), int(self.current_pos.y)
+        # Use gfxdraw for a high-quality anti-aliased circle
+        pygame.gfxdraw.aacircle(surface, x, y, C.PARTICLE_RADIUS, self.color)
+        pygame.gfxdraw.filled_circle(surface, x, y, C.PARTICLE_RADIUS, self.color)
 
 #======================================
 # HELPER FUNCTIONS
@@ -94,9 +100,21 @@ def calculate_agent_positions(sim):
     return firm_positions, hh_positions
 
 def draw_agents(surface, agent_positions, color):
-    """Draws agents based on their pre-calculated positions."""
+    """
+    Draws smooth, anti-aliased agents with an outline based on their
+    pre-calculated positions.
+    """
     for pos in agent_positions.values():
-        pygame.draw.circle(surface, color, (int(pos[0]), int(pos[1])), C.AGENT_RADIUS)
+        x, y = int(pos[0]), int(pos[1])
+        outline_radius = C.AGENT_RADIUS + C.AGENT_OUTLINE_WIDTH
+
+        # 1. Draw the anti-aliased outline
+        pygame.gfxdraw.aacircle(surface, x, y, outline_radius, C.COLOR_OUTLINE)
+        pygame.gfxdraw.filled_circle(surface, x, y, outline_radius, C.COLOR_OUTLINE)
+
+        # 2. Draw the anti-aliased agent body on top
+        pygame.gfxdraw.aacircle(surface, x, y, C.AGENT_RADIUS, color)
+        pygame.gfxdraw.filled_circle(surface, x, y, C.AGENT_RADIUS, color)
 
 #======================================
 # MAIN APPLICATION
@@ -164,12 +182,14 @@ def main():
             # --- Update and Draw ---
             screen.fill(C.COLOR_BACKGROUND)
             
-            draw_agents(screen, firm_positions, C.COLOR_FIRM)
-            draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
-            
+            # Update and draw particles first, so they appear underneath the agents
             for particle in active_particles:
                 particle.update()
                 particle.draw(screen)
+            
+            # Draw agents on top of the particles
+            draw_agents(screen, firm_positions, C.COLOR_FIRM)
+            draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
                 
             active_particles = [p for p in active_particles if not p.finished]
             
