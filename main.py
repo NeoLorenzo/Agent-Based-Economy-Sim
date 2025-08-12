@@ -81,16 +81,16 @@ def calculate_agent_positions(num_firms, num_households):
         
     return firm_positions, hh_positions
 
-def display_final_graphs(inventory_data, price_data, capital_data, employee_data):
+def display_final_graphs(inventory_data, price_data, capital_data, employee_data, wage_data):
     """
-    Displays the firm inventory, price, capital, and employee history in a Matplotlib window.
+    Displays the firm inventory, price, capital, employee, and wage history in a Matplotlib window.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Displaying final inventory, price, capital, and employee graphs...")
+    logger.info("Displaying final inventory, price, capital, employee, and wage graphs...")
 
     to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
     plt.style.use('dark_background')
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
+    fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 18), sharex=True)
 
     # Plot 1: Inventory
     for i, (firm_id, history) in enumerate(inventory_data.items()):
@@ -135,7 +135,18 @@ def display_final_graphs(inventory_data, price_data, capital_data, employee_data
     ax4.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
     ax4.legend()
 
-    for ax in [ax1, ax2, ax3, ax4]:
+    # Plot 5: Wages
+    for i, (firm_id, history) in enumerate(wage_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax5.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+    ax5.set_title("Firm Wage Rate Over Time", fontsize=14)
+    ax5.set_xlabel("Tick", fontsize=10)
+    ax5.set_ylabel("Wage Rate", fontsize=10)
+    ax5.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax5.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax5.legend()
+
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
         axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
         tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
         ax.spines['top'].set_color(axis_color)
@@ -204,7 +215,7 @@ def main():
                 time_since_last_tick -= time_per_tick
                 context_filter.tick = tick_counter
                 
-                transactions, summary = sim.run_one_tick()
+                transactions, summary = sim.run_one_tick(tick_counter)
                 # Log summary only every 100 ticks or on the first tick
                 if tick_counter % 100 == 0 or tick_counter == 1:
                     logger.info(
@@ -262,7 +273,9 @@ def main():
         logger.critical("Unhandled exception in main loop, shutting down.", exc_info=True)
     finally:
         logger.info("Simulation loop ended. Shutting down.")
-        display_final_graphs(inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data)
+        # We need to get the wage data for the final plot
+        wage_graph_data = sim._wage_history if hasattr(sim, '_wage_history') else {}
+        display_final_graphs(inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data, wage_graph_data)
         pygame.quit()
         sys.exit()
 

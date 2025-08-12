@@ -124,20 +124,24 @@ class Simulation:
             self._price_history = {i: [] for i in range(self.config['N_F'])}
             self._capital_history = {i: [] for i in range(self.config['N_F'])}
             self._employee_history = {i: [] for i in range(self.config['N_F'])}
+            # Add wage history tracking for validation
+            self._wage_history = {i: [] for i in range(self.config['N_F'])}
 
         for i in range(self.config['N_F']):
             self._inventory_history[i].append(self.firms['inventory'][i])
             self._price_history[i].append(self.firms['price'][i])
             self._capital_history[i].append(self.firms['balance'][i])
             self._employee_history[i].append(self.firms['num_workers'][i])
+            self._wage_history[i].append(self.firms['wage_rate'][i])
 
         return self._inventory_history, self._price_history, self._capital_history, self._employee_history
 
-    def run_one_tick(self):
+    def run_one_tick(self, current_tick):
         """
         Executes one full cycle of the simulation using vectorized operations.
         Returns a list of transactions for visualization and a summary for logging.
         """
+        self._current_tick = current_tick # Store tick for internal logic
         transactions_this_tick = []
         tick_summary = {
             'total_restock_cost': 0.0,
@@ -332,9 +336,10 @@ class Simulation:
         num_unemployed = np.count_nonzero(self.households['employer_id'] == -1)
         tick_summary['unemployment_rate'] = (num_unemployed / self.config['N_H']) * 100
 
-        # 5. Firm Adjustment Phase (e.g., Price Changes)
+        # 5. Firm Adjustment Phase (Prices and Wages)
         logger.debug("Start Firm Adjustment Phase")
         
+        # --- Price Adjustments ---
         upper_threshold = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
         lower_threshold = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
         
@@ -347,14 +352,39 @@ class Simulation:
         self.firms['price'][should_raise_price] *= (1 + adj_rate)
         self.firms['price'][should_lower_price] *= (1 - adj_rate)
         
-        # Aggregate price change information for logging to avoid spam.
         price_changes = np.where(old_prices != self.firms['price'])[0]
         if len(price_changes) > 0:
-            # For a more detailed but still throttled log, you could list a few changes.
-            # For now, a simple count is best to adhere to Rule 2.4.
-            logger.info(
-                "%d firms adjusted their prices this tick.",
-                len(price_changes)
-            )
+            logger.info("%d firms adjusted their prices this tick.", len(price_changes))
+
+        # --- Wage Adjustments (New) ---
+        # This logic runs on a throttled interval to prevent chaotic oscillations.
+        tick_interval = self.config.get('wage_adjustment_tick_interval', 20)
+        if self.config.get('enable_dynamic_wages', False) and (self._current_tick % tick_interval == 0):
+            target_unemployment = self.config['target_unemployment_rate']
+            current_unemployment = tick_summary['unemployment_rate'] / 100.0
+            sensitivity = self.config['wage_adjustment_sensitivity']
             
+            # The core adjustment formula: if unemployment is below target, wages rise, and vice-versa.
+            adjustment_factor = (target_unemployment - current_unemployment) * sensitivity
+            
+            old_wages = self.firms['wage_rate'].copy()
+            self.firms['wage_rate'] *= (1 + adjustment_factor)
+            
+            # Prevent wages from falling below a minimum subsistence level (e.g., wholesale price of one food unit)
+            min_wage = self.config['wholesale_price'] * self.config['food_per_person']
+            self.firms['wage_rate'][self.firms['wage_rate'] < min_wage] = min_wage
+            
+            num_increased = np.count_nonzero(self.firms['wage_rate'] > old_wages)
+            num_decreased = np.count_nonzero(self.firms['wage_rate'] < old_wages)
+            
+            if num_increased > 0 or num_decreased > 0:
+                logger.info(
+                    "Unemployment is %.1f%%. Adjusting wages (Target: %.1f%%, Sensitivity: %.1f). %d firms increased wages, %d firms decreased.",
+                    current_unemployment * 100,
+                    target_unemployment * 100,
+                    sensitivity,
+                    num_increased,
+                    num_decreased
+                )
+
         return transactions_this_tick, tick_summary
