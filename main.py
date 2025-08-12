@@ -292,11 +292,21 @@ def main():
                 
                 # Create new particles for each transaction
                 for trans in transactions:
-                    start_pos = household_positions.get(trans['from_id'], firm_positions.get(trans['from_id']))
-                    end_pos = firm_positions.get(trans['to_id'], household_positions.get(trans['to_id']))
+                    start_pos, end_pos = None, None
+                    color = None
+
+                    if trans['type'] == 'spending':
+                        # Spending: Household -> Firm
+                        start_pos = household_positions.get(trans['from_id'])
+                        end_pos = firm_positions.get(trans['to_id'])
+                        color = C.COLOR_MONEY
+                    elif trans['type'] == 'wage':
+                        # Wage: Firm -> Household
+                        start_pos = firm_positions.get(trans['from_id'])
+                        end_pos = household_positions.get(trans['to_id'])
+                        color = C.COLOR_WAGE
                     
                     if start_pos and end_pos:
-                        color = C.COLOR_MONEY if trans['type'] == 'spending' else C.COLOR_WAGE
                         active_particles.append(Particle(start_pos, end_pos, color))
                 
                 tick_counter += 1
