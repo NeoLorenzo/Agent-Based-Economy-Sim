@@ -5,6 +5,24 @@ import logging.config
 import json
 import os
 from datetime import datetime
+import collections
+
+class BufferingHandler(logging.Handler):
+    """
+    A custom logging handler that keeps a buffer of the last N log records.
+    It is used to provide context during a critical failure.
+    """
+    def __init__(self, maxlen=200):
+        super().__init__()
+        self.buffer = collections.deque(maxlen=maxlen)
+
+    def emit(self, record):
+        """Append the formatted record to the buffer."""
+        self.buffer.append(self.format(record))
+
+    def get_buffer_lines(self):
+        """Return the buffered lines as a list of strings."""
+        return list(self.buffer)
 
 class ContextFilter(logging.Filter):
     """
@@ -52,10 +70,18 @@ def setup_logging(config_path='config.json'):
     seed = config.get('seed', 'N/A')
     context_filter = ContextFilter(run_id=run_id, seed=seed)
     
-    # Add filter to all configured handlers
-    for handler in logging.getLogger().handlers:
+    # 5. Create and configure the buffering handler for crash context
+    buffering_handler = BufferingHandler()
+    buffering_handler.setLevel(logging.DEBUG)
+    # Use the same detailed formatter for the buffer
+    buffering_handler.setFormatter(logging.Formatter(log_config['formatters']['detailed']['format']))
+
+    # 6. Add the custom context filter and the new buffer handler to the root logger
+    root_logger = logging.getLogger()
+    root_logger.addHandler(buffering_handler)
+    for handler in root_logger.handlers:
         handler.addFilter(context_filter)
 
     logging.info("Logging configured. Log files will be saved to: %s", run_dir)
     
-    return context_filter, run_dir
+    return context_filter, run_dir, buffering_handler

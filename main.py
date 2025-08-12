@@ -147,7 +147,7 @@ def display_final_graphs(inventory_data, price_data, capital_data):
 # MAIN APPLICATION
 #======================================
 def main():
-    context_filter, run_dir = logging_setup.setup_logging()
+    context_filter, run_dir, buffering_handler = logging_setup.setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Application starting...")
     
@@ -155,7 +155,7 @@ def main():
     screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
     pygame.display.set_caption("Agent-Based Economy Simulation")
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Arial", 12)
+    font = pygame.font.SysFont(C.FONT_FACE, C.FONT_SIZE)
     
     with open('config.json', 'r') as f:
         config = json.load(f)
@@ -244,6 +244,10 @@ def main():
             pygame.display.flip()
             
     except Exception as e:
+        logger.error("--- START OF RECENT DEBUG CONTEXT (from crash) ---")
+        for line in buffering_handler.get_buffer_lines():
+            logger.error(line)
+        logger.error("--- END OF RECENT DEBUG CONTEXT ---")
         logger.critical("Unhandled exception in main loop, shutting down.", exc_info=True)
     finally:
         logger.info("Simulation loop ended. Shutting down.")

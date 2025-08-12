@@ -41,9 +41,9 @@ The simulation is built upon several key principles:
 The current version of the simulation is a minimal viable product (MVP) designed to establish the foundational code structure. The economic model is intentionally simplistic and relies on several major abstractions that will be replaced in future iterations.
 
 1.  **Market Mechanism:**
-    *   **Abstraction:** In each tick, households choose which firm to purchase from based on geographic proximity. The simulation calculates the closest firm to each household, and the household shops there exclusively. This introduces a basic, yet realistic, constraint to consumer choice.
-    *   **Configuration:** This behavior is controlled by the `enable_proximity_choice` flag in `config.json`. If set to `false`, the simulation reverts to the legacy model where households choose a firm completely at random.
-    *   **Limitation:** While more realistic than random choice, this model still lacks more advanced decision-making factors like price comparison, firm reputation, or product differentiation.
+    *   **Abstraction:** In each tick, households exhibit a realistic, two-step shopping behavior. First, they identify a small number of the geographically closest firms (for convenience). Second, they evaluate the prices at those nearby firms and choose to shop at the one offering the lowest price. This models a consumer's trade-off between convenience and cost.
+    *   **Configuration:** This behavior is controlled by the `enable_proximity_choice` flag and the `shopping_firms_to_consider` parameter in `config.json`. If `enable_proximity_choice` is `false`, the simulation reverts to a simpler model where households choose a firm completely at random.
+    *   **Limitation:** This model is a significant step up from simple proximity or random choice, but it still lacks factors like brand loyalty, product quality differences, or the influence of advertising. All goods are treated as perfect substitutes.
 
 2.  **Labor Market:**
     *   **Abstraction:** At the start of the simulation, each household is assigned to a single firm as its permanent employer.

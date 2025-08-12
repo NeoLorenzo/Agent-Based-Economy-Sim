@@ -42,6 +42,10 @@ COLOR_GRID = (45, 50, 55)               # Slightly lighter than background
 # --- Agent Visuals ---
 AGENT_OUTLINE_WIDTH = 2 # Width of the agent's outline in pixels
 
+# --- Fonts ---
+FONT_FACE = "Arial"
+FONT_SIZE = 12
+
 #======================================
 # GRAPH VISUALIZATION SETTINGS
 #======================================
