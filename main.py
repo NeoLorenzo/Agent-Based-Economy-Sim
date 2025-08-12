@@ -99,10 +99,28 @@ def calculate_agent_positions(sim):
         
     return firm_positions, hh_positions
 
-def draw_agents(surface, agent_positions, color):
+def draw_grid(surface):
+    """Draws a subtle grid on the background."""
+    for x in range(0, C.SCREEN_WIDTH, C.GRID_SPACING):
+        pygame.draw.line(surface, C.COLOR_GRID, (x, 0), (x, C.SCREEN_HEIGHT))
+    for y in range(0, C.SCREEN_HEIGHT, C.GRID_SPACING):
+        pygame.draw.line(surface, C.COLOR_GRID, (0, y), (C.SCREEN_WIDTH, y))
+
+def draw_agent_shadows(surface, agent_positions):
+    """Draws only the drop shadows for all agents."""
+    for pos in agent_positions.values():
+        x, y = int(pos[0]), int(pos[1])
+        shadow_pos = (x + C.SHADOW_OFFSET, y + C.SHADOW_OFFSET)
+        outline_radius = C.AGENT_RADIUS + C.AGENT_OUTLINE_WIDTH
+
+        # Use gfxdraw for a smooth, anti-aliased circle
+        pygame.gfxdraw.aacircle(surface, shadow_pos[0], shadow_pos[1], outline_radius, C.COLOR_SHADOW)
+        pygame.gfxdraw.filled_circle(surface, shadow_pos[0], shadow_pos[1], outline_radius, C.COLOR_SHADOW)
+
+def draw_agent_bodies(surface, agent_positions, color):
     """
-    Draws smooth, anti-aliased agents with an outline based on their
-    pre-calculated positions.
+    Draws the visible bodies (outline and fill) for all agents.
+    This should be called after shadows and particles are drawn.
     """
     for pos in agent_positions.values():
         x, y = int(pos[0]), int(pos[1])
@@ -192,15 +210,20 @@ def main():
 
             # --- Update and Draw (run every frame for smooth animation) ---
             screen.fill(C.COLOR_BACKGROUND)
+            draw_grid(screen)
             
-            # Update and draw particles first, so they appear underneath the agents
+            # 1. Draw shadows first, so they are under everything else
+            draw_agent_shadows(screen, firm_positions)
+            draw_agent_shadows(screen, household_positions)
+            
+            # 2. Update and draw particles on top of shadows
             for particle in active_particles:
                 particle.update()
                 particle.draw(screen)
             
-            # Draw agents on top of the particles
-            draw_agents(screen, firm_positions, C.COLOR_FIRM)
-            draw_agents(screen, household_positions, C.COLOR_HOUSEHOLD)
+            # 3. Draw agent bodies on top of particles
+            draw_agent_bodies(screen, firm_positions, C.COLOR_FIRM)
+            draw_agent_bodies(screen, household_positions, C.COLOR_HOUSEHOLD)
                 
             active_particles = [p for p in active_particles if not p.finished]
             
