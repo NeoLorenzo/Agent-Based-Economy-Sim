@@ -25,6 +25,8 @@ class Household:
 
     def place_order_and_pay(self, price, food_per_person):
         """
+        DEPRECATED: This logic is now handled in the main simulation loop
+        to better coordinate with firm inventory.
         Calculates food demand, determines what can be afforded,
         and returns the quantity purchased. Updates balance.
         """
@@ -44,17 +46,46 @@ class Household:
 
 class Firm:
     """Represents a firm that produces goods and employs households."""
-    def __init__(self, id, price, wage_rate):
+    def __init__(self, id, price, wage_rate, production_per_tick):
         self.id = id
         self.balance = 0.0
         self.price = float(price)
         self.wage_rate = float(wage_rate)
+        self.production_per_tick = production_per_tick
+        self.inventory = 0
         self.worker_ids = [] # A list of household IDs
         self.revenue_this_tick = 0.0
 
     def add_worker(self, household_id):
         """Assigns a household to this firm."""
         self.worker_ids.append(household_id)
+
+    def produce_goods(self):
+        """Produces goods and adds them to inventory."""
+        self.inventory += self.production_per_tick
+
+    def process_sale(self, requested_quantity):
+        """
+        Processes a sale request, checking against available inventory.
+        Returns the actual quantity sold.
+        """
+        if requested_quantity <= 0:
+            return 0
+
+        if self.inventory <= 0:
+            logger.debug("Firm %d is stocked out. Denying sale of %d units.", self.id, requested_quantity)
+            return 0
+
+        sold_quantity = min(requested_quantity, self.inventory)
+        
+        if sold_quantity < requested_quantity:
+            logger.debug(
+                "Firm %d inventory is %d, but %d were requested. Selling remaining %d.",
+                self.id, self.inventory, requested_quantity, sold_quantity
+            )
+
+        self.inventory -= sold_quantity
+        return sold_quantity
 
     def receive_payment(self, amount):
         """Collects money from sales."""
@@ -116,7 +147,12 @@ class Simulation:
         logger.info("Setting up the simulation world...")
         # Create Firms
         for i in range(self.config['N_F']):
-            self.firms[i] = Firm(id=i, price=self.config['p'], wage_rate=self.config['wage_rate'])
+            self.firms[i] = Firm(
+                id=i, 
+                price=self.config['p'], 
+                wage_rate=self.config['wage_rate'],
+                production_per_tick=self.config['firm_production_per_tick']
+            )
         logger.debug("Created %d firms.", self.config['N_F'])
 
         # Get a list of firm IDs to assign workers to
@@ -165,7 +201,12 @@ class Simulation:
         firm_list = list(self.firms.values())
         transactions_this_tick = []
 
-        # 1. Shopping Phase
+        # 1. Production Phase
+        logger.debug("Start Production Phase")
+        for f in self.firms.values():
+            f.produce_goods()
+
+        # 2. Shopping Phase
         logger.debug("Start Shopping Phase")
         for hh in self.households.values():
             chosen_firm = None
@@ -178,15 +219,19 @@ class Simulation:
             if not chosen_firm:
                 logger.warning("Household %d could not choose a firm. Skipping.", hh.id)
                 continue
+            
+            # Household determines what it wants and can afford
+            requested_qty = hh.determine_food_demand(self.config['food_per_person'])
+            max_affordable_qty = int(hh.balance / chosen_firm.price)
+            purchase_request_qty = min(requested_qty, max_affordable_qty)
 
-            purchased_qty = hh.place_order_and_pay(
-                price=chosen_firm.price,
-                food_per_person=self.config['food_per_person']
-            )
+            # Firm processes the sale based on its inventory
+            actual_qty_sold = chosen_firm.process_sale(purchase_request_qty)
 
-            if purchased_qty > 0:
+            if actual_qty_sold > 0:
                 # A transaction occurred, record it
-                amount = purchased_qty * chosen_firm.price
+                amount = actual_qty_sold * chosen_firm.price
+                hh.balance -= amount # Manually update balance
                 chosen_firm.receive_payment(amount)
                 transactions_this_tick.append({
                     'type': 'spending',
@@ -194,7 +239,7 @@ class Simulation:
                     'to_id': chosen_firm.id,
                     'amount': amount
                 })
-                logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f", hh.id, chosen_firm.id, amount)
+                logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f, Qty: %d", hh.id, chosen_firm.id, amount, actual_qty_sold)
 
         # 2. Payday Phase
         logger.debug("Start Payday Phase")
