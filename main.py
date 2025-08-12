@@ -8,6 +8,7 @@ import random
 import math
 import numpy as np
 import logging
+import collections
 from simulation import Simulation
 import constants as C
 import logging_setup
@@ -82,8 +83,9 @@ def calculate_agent_positions(sim):
 
     for _ in range(total_agents):
         while True:
-            # Generate a new candidate position (Rule 12)
-            x = np.random.randint(C.SCREEN_PADDING, C.SCREEN_WIDTH - C.SCREEN_PADDING)
+            # Generate a new candidate position, avoiding the graph area (Rule 12)
+            min_x = C.GRAPH_X + C.GRAPH_WIDTH + C.SCREEN_PADDING
+            x = np.random.randint(min_x, C.SCREEN_WIDTH - C.SCREEN_PADDING)
             y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING)
             candidate_pos = (x, y)
             
@@ -153,6 +155,74 @@ def draw_agent_bodies(surface, agent_positions, color):
         pygame.gfxdraw.aacircle(surface, x, y, C.AGENT_RADIUS, color)
         pygame.gfxdraw.filled_circle(surface, x, y, C.AGENT_RADIUS, color)
 
+def update_graph_data(graph_data, sim):
+    """Appends the current inventory of each firm to the historical data deque."""
+    for firm_id, firm in sim.firms.items():
+        graph_data[firm_id].append(firm.inventory)
+
+def draw_graph(surface, graph_data, config, font):
+    """Draws a dynamic, auto-scaling graph with axes, labels, and a legend."""
+    # 1. Draw background and border
+    graph_rect = pygame.Rect(C.GRAPH_X, C.GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT)
+    pygame.draw.rect(surface, C.GRAPH_BG_COLOR, graph_rect)
+    pygame.draw.rect(surface, C.GRAPH_AXIS_COLOR, graph_rect, 1)
+
+    # 2. Define plot area, leaving space for labels
+    plot_start_x = C.GRAPH_X + C.GRAPH_AXIS_LABEL_PADDING
+    plot_start_y = C.GRAPH_Y + C.GRAPH_PADDING
+    plot_area_width = C.GRAPH_WIDTH - C.GRAPH_AXIS_LABEL_PADDING - C.GRAPH_PADDING
+    plot_area_height = C.GRAPH_HEIGHT - 2 * C.GRAPH_PADDING
+
+    # 3. Dynamically determine Y-axis scale based on visible data
+    max_y_val = 1 # Start with a minimum value
+    for history in graph_data.values():
+        if history:
+            max_y_val = max(max_y_val, max(history))
+    max_y_val *= 1.1  # Add a 10% buffer to the top
+    if max_y_val < 10: max_y_val = 10 # Ensure a minimum sensible scale
+
+    # 4. Draw Axes and Labels
+    # Y-Axis Line
+    y_axis_start = (plot_start_x, plot_start_y)
+    y_axis_end = (plot_start_x, plot_start_y + plot_area_height)
+    pygame.draw.line(surface, C.GRAPH_AXIS_COLOR, y_axis_start, y_axis_end)
+    # X-Axis Line
+    x_axis_start = (plot_start_x, plot_start_y + plot_area_height)
+    x_axis_end = (plot_start_x + plot_area_width, plot_start_y + plot_area_height)
+    pygame.draw.line(surface, C.GRAPH_AXIS_COLOR, x_axis_start, x_axis_end)
+
+    # Y-Axis Labels
+    max_y_text = font.render(f"{int(max_y_val)}", True, C.GRAPH_FONT_COLOR)
+    surface.blit(max_y_text, (plot_start_x - max_y_text.get_width() - 5, plot_start_y - 7))
+    min_y_text = font.render("0", True, C.GRAPH_FONT_COLOR)
+    surface.blit(min_y_text, (plot_start_x - min_y_text.get_width() - 5, plot_start_y + plot_area_height - 7))
+
+    # 5. Draw each firm's inventory line
+    spacing_x = plot_area_width / (C.GRAPH_MAX_HISTORY - 1) if C.GRAPH_MAX_HISTORY > 1 else 0
+    for i, (firm_id, history) in enumerate(graph_data.items()):
+        color = C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)]
+        if len(history) < 2: continue
+
+        points = []
+        start_offset = C.GRAPH_MAX_HISTORY - len(history)
+        for tick_index, value in enumerate(history):
+            x = plot_start_x + (start_offset + tick_index) * spacing_x
+            y = plot_start_y + plot_area_height * (1 - (value / max_y_val))
+            points.append((x, y))
+        pygame.draw.lines(surface, color, False, points, C.GRAPH_LINE_WIDTH)
+
+    # 6. Draw Title and Legend
+    title_text = font.render("Firm Inventory", True, C.GRAPH_FONT_COLOR)
+    surface.blit(title_text, (plot_start_x + 5, C.GRAPH_Y + 5))
+    legend_start_x = C.GRAPH_X + C.GRAPH_WIDTH - C.GRAPH_PADDING - 70
+    legend_start_y = C.GRAPH_Y + C.GRAPH_PADDING
+    for i, firm_id in enumerate(graph_data.keys()):
+        color = C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)]
+        text_surface = font.render(f"Firm {firm_id}", True, C.GRAPH_FONT_COLOR)
+        item_y = legend_start_y + (i * 15)
+        pygame.draw.rect(surface, color, (legend_start_x, item_y, 10, 10))
+        surface.blit(text_surface, (legend_start_x + 15, item_y - 2))
+
 #======================================
 # MAIN APPLICATION
 #======================================
@@ -167,6 +237,7 @@ def main():
     screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
     pygame.display.set_caption("Agent-Based Economy Simulation")
     clock = pygame.time.Clock()
+    font = pygame.font.SysFont("Arial", 12)
     
     with open('config.json', 'r') as f:
         config = json.load(f)
@@ -186,6 +257,12 @@ def main():
 
     # Now, create the final simulation object with the position data
     sim = Simulation(config, firm_positions, household_positions)
+    
+    # Initialize data structure for the graph
+    graph_data = {
+        firm_id: collections.deque(maxlen=C.GRAPH_MAX_HISTORY)
+        for firm_id in sim.firms.keys()
+    }
     
     active_particles = []
     tick_counter = 0
@@ -215,6 +292,7 @@ def main():
                 context_filter.tick = tick_counter
                 logger.debug("Running simulation tick %d", tick_counter)
                 transactions = sim.run_one_tick()
+                update_graph_data(graph_data, sim) # Capture inventory state for the graph
                 
                 # Create new particles for each transaction
                 for trans in transactions:
@@ -230,6 +308,9 @@ def main():
             # --- Update and Draw (run every frame for smooth animation) ---
             screen.fill(C.COLOR_BACKGROUND)
             draw_grid(screen)
+            
+            # Draw the graph on the left side
+            draw_graph(screen, graph_data, config, font)
             
             # 1. Draw shadows first, so they are under everything else
             draw_agent_shadows(screen, firm_positions)

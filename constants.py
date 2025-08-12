@@ -41,3 +41,26 @@ COLOR_GRID = (45, 50, 55)               # Slightly lighter than background
 
 # --- Agent Visuals ---
 AGENT_OUTLINE_WIDTH = 2 # Width of the agent's outline in pixels
+
+#======================================
+# GRAPH VISUALIZATION SETTINGS
+#======================================
+GRAPH_WIDTH = 300
+GRAPH_HEIGHT = 250
+GRAPH_X = 20
+GRAPH_Y = 20
+GRAPH_PADDING = 20
+GRAPH_AXIS_LABEL_PADDING = 30 # Space on the left for Y-axis labels
+GRAPH_MAX_HISTORY = 150 # Number of ticks to show on the x-axis
+GRAPH_BG_COLOR = (40, 45, 50)
+GRAPH_AXIS_COLOR = (150, 150, 150)
+GRAPH_FONT_COLOR = (200, 200, 200)
+GRAPH_LINE_WIDTH = 2
+# A list of distinct colors for the firm graph lines
+GRAPH_LINE_COLORS = [
+    (52, 152, 219),  # Peter River
+    (231, 76, 60),   # Alizarin
+    (46, 204, 113),  # Emerald
+    (241, 196, 15),  # Sun Flower
+    (155, 89, 182),  # Amethyst
+]
