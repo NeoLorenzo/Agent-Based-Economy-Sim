@@ -105,6 +105,32 @@ class Simulation:
         # Find the index of the minimum distance for each household
         return np.argmin(dist_sq, axis=1)
 
+    def update_and_get_firm_data_for_render(self):
+        """
+        Updates the historical data tracking for firms and returns it in a
+        format suitable for the visualization module.
+
+        This method is called once per tick by the main loop.
+
+        Returns:
+            tuple: A tuple containing three dictionaries:
+                   - inventory_data (dict): {firm_id: [history]}
+                   - price_data (dict): {firm_id: [history]}
+                   - capital_data (dict): {firm_id: [history]}
+        """
+        # Initialize on first call
+        if not hasattr(self, '_inventory_history'):
+            self._inventory_history = {i: [] for i in range(self.config['N_F'])}
+            self._price_history = {i: [] for i in range(self.config['N_F'])}
+            self._capital_history = {i: [] for i in range(self.config['N_F'])}
+
+        for i in range(self.config['N_F']):
+            self._inventory_history[i].append(self.firms['inventory'][i])
+            self._price_history[i].append(self.firms['price'][i])
+            self._capital_history[i].append(self.firms['balance'][i])
+
+        return self._inventory_history, self._price_history, self._capital_history
+
     def run_one_tick(self):
         """
         Executes one full cycle of the simulation using vectorized operations.
@@ -257,15 +283,14 @@ class Simulation:
         self.firms['price'][should_raise_price] *= (1 + adj_rate)
         self.firms['price'][should_lower_price] *= (1 - adj_rate)
         
-        # Price change logging is INFO level and reports on state changes, which is acceptable.
-        for firm_id in range(self.config['N_F']):
-            if old_prices[firm_id] != self.firms['price'][firm_id]:
-                logger.info(
-                    "Firm %d adjusted price from %.2f to %.2f due to inventory level of %d",
-                    firm_id,
-                    old_prices[firm_id],
-                    self.firms['price'][firm_id],
-                    self.firms['inventory'][firm_id]
-                )
+        # Aggregate price change information for logging to avoid spam.
+        price_changes = np.where(old_prices != self.firms['price'])[0]
+        if len(price_changes) > 0:
+            # For a more detailed but still throttled log, you could list a few changes.
+            # For now, a simple count is best to adhere to Rule 2.4.
+            logger.info(
+                "%d firms adjusted their prices this tick.",
+                len(price_changes)
+            )
             
         return transactions_this_tick, tick_summary

@@ -19,8 +19,23 @@ import visualization as viz # Import the new module
 #======================================
 def calculate_agent_positions(num_firms, num_households):
     """
-    Calculates random screen positions for all firms and households, ensuring
-    they do not overlap. This uses rejection sampling to find valid positions.
+    Calculates non-overlapping screen positions for agents.
+
+    Uses rejection sampling to place agents on the screen, ensuring a minimum
+    distance between them. This function is deterministic if the global RNG
+    is seeded.
+
+    Args:
+        num_firms (int): The number of firms to generate positions for.
+        num_households (int): The number of households to generate positions for.
+
+    Returns:
+        tuple[dict, dict]: A tuple containing two dictionaries:
+            - firm_positions (dict[int, tuple[int, int]]): Firm IDs mapped to (x, y) coordinates.
+            - hh_positions (dict[int, tuple[int, int]]): Household IDs mapped to (x, y) coordinates.
+
+    Side Effects:
+        Consumes values from the `numpy.random` generator.
     """
     firm_positions = {}
     hh_positions = {}
@@ -65,24 +80,6 @@ def calculate_agent_positions(num_firms, num_households):
         hh_positions[household_id] = position
         
     return firm_positions, hh_positions
-
-def update_graph_data(graph_data, sim):
-    """Appends the current inventory of each firm to the historical data list."""
-    inventories = sim.firms['inventory']
-    for firm_id, inventory_value in enumerate(inventories):
-        graph_data[firm_id].append(inventory_value)
-
-def update_price_graph_data(price_graph_data, sim):
-    """Appends the current price of each firm to the historical data list."""
-    prices = sim.firms['price']
-    for firm_id, price_value in enumerate(prices):
-        price_graph_data[firm_id].append(price_value)
-
-def update_capital_graph_data(capital_graph_data, sim):
-    """Appends the current balance of each firm to the historical data list."""
-    balances = sim.firms['balance']
-    for firm_id, balance_value in enumerate(balances):
-        capital_graph_data[firm_id].append(balance_value)
 
 def display_final_graphs(inventory_data, price_data, capital_data):
     """
@@ -196,19 +193,19 @@ def main():
                 context_filter.tick = tick_counter
                 
                 transactions, summary = sim.run_one_tick()
-                logger.info(
-                    "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units)",
-                    tick_counter,
-                    summary['total_sales_volume'],
-                    summary['total_sales_units'],
-                    summary['total_wages_paid'],
-                    summary['total_restock_cost'],
-                    summary['total_restock_units']
-                )
+                # Log summary only every 100 ticks or on the first tick
+                if tick_counter % 100 == 0 or tick_counter == 1:
+                    logger.info(
+                        "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units)",
+                        tick_counter,
+                        summary['total_sales_volume'],
+                        summary['total_sales_units'],
+                        summary['total_wages_paid'],
+                        summary['total_restock_cost'],
+                        summary['total_restock_units']
+                    )
 
-                update_graph_data(inventory_graph_data, sim)
-                update_price_graph_data(price_graph_data, sim)
-                update_capital_graph_data(capital_graph_data, sim)
+                inventory_graph_data, price_graph_data, capital_graph_data = sim.update_and_get_firm_data_for_render()
                 
                 for trans in transactions:
                     start_pos, end_pos, color = None, None, None
