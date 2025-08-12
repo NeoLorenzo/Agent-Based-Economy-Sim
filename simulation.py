@@ -40,7 +40,8 @@ class Simulation:
             ('inventory', 'i4'),
             ('target_inventory', 'i4'),
             ('revenue_this_tick', 'f8'),
-            ('num_workers', 'i4')
+            ('num_workers', 'i4'),
+            ('target_num_workers', 'i4')
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
@@ -81,6 +82,7 @@ class Simulation:
         # Count number of workers for each firm efficiently
         ids, counts = np.unique(assigned_employers, return_counts=True)
         self.firms['num_workers'][ids] = counts
+        self.firms['target_num_workers'] = self.firms['num_workers'].copy() # Initialize target
         
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")
@@ -142,7 +144,8 @@ class Simulation:
             'total_restock_units': 0,
             'total_sales_volume': 0.0,
             'total_sales_units': 0,
-            'total_wages_paid': 0.0
+            'total_wages_paid': 0.0,
+            'unemployment_rate': 0.0
         }
 
         # 1. Wholesale Restocking Phase (Vectorized)
@@ -239,20 +242,25 @@ class Simulation:
         # 3. Payday Phase (Vectorized)
         logger.debug("Start Payday Phase")
         
-        # Calculate total wage payout per firm
+        # Bank revenue before paying wages
+        self.firms['balance'] += self.firms['revenue_this_tick']
+        
+        # Calculate total wage payout per firm based on revenue
         total_payout = self.firms['revenue_this_tick'] * self.firms['wage_rate']
         
-        # Update firm balances (revenue is now banked)
-        self.firms['balance'] += self.firms['revenue_this_tick'] - total_payout
+        # Firms pay wages from their balance
+        self.firms['balance'] -= total_payout
         self.firms['revenue_this_tick'][:] = 0 # Reset for next tick
         
         # Calculate wage per worker for each firm, handling firms with no workers
         num_workers = self.firms['num_workers']
         wage_per_worker = np.divide(total_payout, num_workers, out=np.zeros_like(total_payout), where=num_workers!=0)
         
-        # Distribute wages to all households based on their employer
-        payouts_to_households = wage_per_worker[self.households['employer_id']]
-        self.households['balance'] += payouts_to_households
+        # Distribute wages only to employed households
+        employed_mask = self.households['employer_id'] != -1
+        employer_ids = self.households['employer_id'][employed_mask]
+        payouts_to_households = wage_per_worker[employer_ids]
+        self.households['balance'][employed_mask] += payouts_to_households
         
         # Create wage transaction logs
         for firm_id, payout in enumerate(total_payout):
@@ -268,7 +276,63 @@ class Simulation:
         # Aggregate wage data
         tick_summary['total_wages_paid'] = np.sum(total_payout)
 
-        # 4. Firm Adjustment Phase (e.g., Price Changes)
+        # 4. Labor Market Phase (Hiring and Firing)
+        logger.debug("Start Labor Market Phase")
+
+        # --- Firing Logic ---
+        # Firms lay off workers if their capital is too low to support the wage bill from last tick.
+        layoff_threshold = total_payout * self.config['firm_layoff_capital_threshold_factor']
+        firms_that_should_fire = np.where((self.firms['balance'] < layoff_threshold) & (self.firms['num_workers'] > 0))[0]
+
+        for firm_id in firms_that_should_fire:
+            workers_to_fire = 1 # Fire one worker at a time for stability
+            
+            # Find employees of this firm
+            employee_indices = np.where(self.households['employer_id'] == firm_id)[0]
+            
+            if len(employee_indices) > 0:
+                # Choose a random worker to lay off
+                layoff_candidate_idx = np.random.choice(employee_indices, size=min(workers_to_fire, len(employee_indices)), replace=False)
+                
+                # Set them to unemployed
+                self.households['employer_id'][layoff_candidate_idx] = -1
+                
+                num_fired = len(layoff_candidate_idx)
+                self.firms['num_workers'][firm_id] -= num_fired
+                logger.info("Firm %d laid off %d worker(s) due to low capital.", firm_id, num_fired)
+
+        # --- Hiring Logic ---
+        # Firms hire if they have high revenue and are below their target workforce
+        unemployed_hh_indices = np.where(self.households['employer_id'] == -1)[0]
+        
+        if len(unemployed_hh_indices) > 0:
+            # Firms hire if their last revenue was high and they have capacity
+            hiring_revenue_threshold = total_payout * self.config['firm_hiring_revenue_threshold_factor']
+            firms_that_should_hire = np.where((self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers']))[0]
+
+            # Shuffle to give firms a random chance to hire first
+            np.random.shuffle(firms_that_should_hire)
+
+            for firm_id in firms_that_should_hire:
+                # Stop if there are no more unemployed people to hire
+                if len(unemployed_hh_indices) == 0:
+                    break
+                
+                # Hire one worker
+                worker_to_hire_idx = np.random.choice(unemployed_hh_indices)
+                
+                self.households['employer_id'][worker_to_hire_idx] = firm_id
+                self.firms['num_workers'][firm_id] += 1
+                logger.info("Firm %d hired 1 new worker.", firm_id)
+                
+                # Remove the hired person from the pool of unemployed
+                unemployed_hh_indices = np.setdiff1d(unemployed_hh_indices, [worker_to_hire_idx])
+
+        # Update unemployment rate for summary
+        num_unemployed = np.count_nonzero(self.households['employer_id'] == -1)
+        tick_summary['unemployment_rate'] = (num_unemployed / self.config['N_H']) * 100
+
+        # 5. Firm Adjustment Phase (e.g., Price Changes)
         logger.debug("Start Firm Adjustment Phase")
         
         upper_threshold = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']

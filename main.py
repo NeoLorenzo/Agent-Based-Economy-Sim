@@ -196,13 +196,14 @@ def main():
                 # Log summary only every 100 ticks or on the first tick
                 if tick_counter % 100 == 0 or tick_counter == 1:
                     logger.info(
-                        "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units)",
+                        "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units), Unemployment: %.1f%%",
                         tick_counter,
                         summary['total_sales_volume'],
                         summary['total_sales_units'],
                         summary['total_wages_paid'],
                         summary['total_restock_cost'],
-                        summary['total_restock_units']
+                        summary['total_restock_units'],
+                        summary['unemployment_rate']
                     )
 
                 inventory_graph_data, price_graph_data, capital_graph_data = sim.update_and_get_firm_data_for_render()
