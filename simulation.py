@@ -177,5 +177,35 @@ class Simulation:
                     transactions_this_tick.append({
                         'type': 'wage', 'from_id': firm_id, 'to_id': int(worker_id), 'amount': individual_wage
                     })
+
+        # 4. Firm Adjustment Phase (e.g., Price Changes)
+        logger.debug("Start Firm Adjustment Phase")
+        
+        # Define inventory thresholds based on production capacity
+        upper_threshold = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
+        lower_threshold = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
+        
+        # Vectorized conditions for price changes
+        should_raise_price = self.firms['inventory'] < lower_threshold
+        should_lower_price = self.firms['inventory'] > upper_threshold
+        
+        # Store old prices for logging
+        old_prices = self.firms['price'].copy()
+        
+        # Apply price adjustments
+        adj_rate = self.config['price_adjustment_rate']
+        self.firms['price'][should_raise_price] *= (1 + adj_rate)
+        self.firms['price'][should_lower_price] *= (1 - adj_rate)
+        
+        # Log changes where prices were actually modified
+        for firm_id in range(self.config['N_F']):
+            if old_prices[firm_id] != self.firms['price'][firm_id]:
+                logger.info(
+                    "Firm %d adjusted price from %.2f to %.2f due to inventory level of %d",
+                    firm_id,
+                    old_prices[firm_id],
+                    self.firms['price'][firm_id],
+                    self.firms['inventory'][firm_id]
+                )
             
         return transactions_this_tick

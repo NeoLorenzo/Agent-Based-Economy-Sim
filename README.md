@@ -53,6 +53,7 @@ The current version of the simulation is a minimal viable product (MVP) designed
     *   **Abstraction:** Firms produce a fixed quantity of goods each tick, defined by `firm_production_per_tick` in `config.json`. This output is added to a finite inventory. When households make purchases, the quantity sold is limited by the firm's available inventory.
     *   **Limitation:** Production is static and not based on demand, available capital, or labor. Firms cannot adjust their production levels in response to market signals (e.g., consistently sold-out inventory or bloating inventory). The cost of production is not modeled.
 
-4.  **Static Economic Variables:**
-    *   **Abstraction:** Key economic variables—specifically the price of goods (`p`) and the proportion of revenue paid as wages (`wage_rate`)—are static values set in `config.json`.
-    *   **Limitation:** The model lacks any mechanism for price discovery or wage negotiation. The economy cannot self-regulate in response to supply and demand pressures.
+4.  **Price & Wage Mechanisms:**
+    *   **Price:** Firms now dynamically adjust the price of their goods based on inventory levels. If inventory falls below a configured threshold (signaling high demand), the firm raises its price. If inventory exceeds another threshold (signaling a surplus), it lowers the price. This behavior is controlled by `price_adjustment_rate` and inventory threshold factors in `config.json`.
+    *   **Wage Abstraction:** The proportion of revenue paid as wages (`wage_rate`) remains a static value set in `config.json`.
+    *   **Limitation:** While price is now dynamic, the model still lacks a true wage negotiation mechanism. Wages are a fixed percentage of revenue, and there is no labor market competition driving wages up or down.
