@@ -3,227 +3,179 @@
 import random
 import logging
 import math
+import numpy as np
 
 logger = logging.getLogger(__name__)
-
-#======================================
-# AGENT DEFINITIONS
-#======================================
-
-class Household:
-    """Represents a household that consumes goods and provides labor."""
-    def __init__(self, id, balance, size):
-        self.id = id
-        self.balance = float(balance)
-        self.size = size
-        # self.labor_supply = 1 # Not used in MVP but good to keep in mind
-        self.employer_id = None # The ID of the firm that employs this household
-
-    def determine_food_demand(self, food_per_person):
-        """Calculates how much food the household wants to buy."""
-        return self.size * food_per_person
-
-class Firm:
-    """Represents a firm that produces goods and employs households."""
-    def __init__(self, id, price, wage_rate, production_per_tick):
-        self.id = id
-        self.balance = 0.0
-        self.price = float(price)
-        self.wage_rate = float(wage_rate)
-        self.production_per_tick = production_per_tick
-        self.inventory = 0
-        self.worker_ids = [] # A list of household IDs
-        self.revenue_this_tick = 0.0
-
-    def add_worker(self, household_id):
-        """Assigns a household to this firm."""
-        self.worker_ids.append(household_id)
-
-    def produce_goods(self):
-        """Produces goods and adds them to inventory."""
-        self.inventory += self.production_per_tick
-
-    def process_sale(self, requested_quantity):
-        """
-        Processes a sale request, checking against available inventory.
-        Returns the actual quantity sold.
-        """
-        if requested_quantity <= 0:
-            return 0
-
-        if self.inventory <= 0:
-            logger.debug("Firm %d is stocked out. Denying sale of %d units.", self.id, requested_quantity)
-            return 0
-
-        sold_quantity = min(requested_quantity, self.inventory)
-        
-        if sold_quantity < requested_quantity:
-            logger.debug(
-                "Firm %d inventory is %d, but %d were requested. Selling remaining %d.",
-                self.id, self.inventory, requested_quantity, sold_quantity
-            )
-
-        self.inventory -= sold_quantity
-        return sold_quantity
-
-    def receive_payment(self, amount):
-        """Collects money from sales."""
-        self.revenue_this_tick += amount
-
-    def pay_workers(self, households_dict):
-        """
-        Pays wages to all its employees and returns a list of transactions.
-        """
-        # First, update balance with revenue from this tick's sales
-        self.balance += self.revenue_this_tick
-        self.revenue_this_tick = 0 # Reset for next tick
-        
-        wage_transactions = []
-
-        if not self.worker_ids:
-            return wage_transactions # No workers to pay
-
-        # Calculate the total amount to be paid as wages based on this tick's revenue
-        total_payout = self.revenue_this_tick * self.wage_rate
-        
-        # Avoid division by zero if there are no workers
-        if not self.worker_ids:
-            return wage_transactions
-            
-        wage_per_worker = total_payout / len(self.worker_ids)
-
-        # Distribute wages
-        for worker_id in self.worker_ids:
-            households_dict[worker_id].balance += wage_per_worker
-            wage_transactions.append({
-                'type': 'wage',
-                'from_id': self.id,
-                'to_id': worker_id,
-                'amount': wage_per_worker
-            })
-
-        # Update the firm's balance after paying wages
-        self.balance -= total_payout
-        
-        return wage_transactions
 
 #======================================
 # SIMULATION ENGINE
 #======================================
 
 class Simulation:
-    """Manages the overall simulation state and tick loop."""
+    """
+    Manages the overall simulation state and tick loop using NumPy for performance.
+    Agent data is stored in structured NumPy arrays rather than individual objects.
+    """
     def __init__(self, config, firm_positions=None, household_positions=None):
         self.config = config
-        self.firm_positions = firm_positions
-        self.household_positions = household_positions
-        self.households = {} # Use a dictionary for easy lookup by ID
-        self.firms = {}      # Use a dictionary for easy lookup by ID
+        
+        # Convert position dicts to NumPy arrays for vectorized calculations
+        self.firm_pos_array = np.array(list(firm_positions.values()))
+        self.household_pos_array = np.array(list(household_positions.values()))
+        
+        self.households = None # Will be a NumPy structured array
+        self.firms = None      # Will be a NumPy structured array
         self._setup_world()
 
     def _setup_world(self):
-        """Initializes all households and firms based on the config file."""
-        logger.info("Setting up the simulation world...")
-        # Create Firms
-        for i in range(self.config['N_F']):
-            self.firms[i] = Firm(
-                id=i, 
-                price=self.config['p'], 
-                wage_rate=self.config['wage_rate'],
-                production_per_tick=self.config['firm_production_per_tick']
-            )
-        logger.debug("Created %d firms.", self.config['N_F'])
+        """Initializes all agent data in structured NumPy arrays."""
+        logger.info("Setting up the simulation world with NumPy arrays...")
+        
+        # --- Define data structure for Firms ---
+        firm_dtype = [
+            ('balance', 'f8'),
+            ('price', 'f8'),
+            ('wage_rate', 'f8'),
+            ('production_per_tick', 'i4'),
+            ('inventory', 'i4'),
+            ('revenue_this_tick', 'f8'),
+            ('num_workers', 'i4')
+        ]
+        self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
+        
+        # --- Initialize Firm data ---
+        self.firms['price'] = self.config['p']
+        self.firms['wage_rate'] = self.config['wage_rate']
+        self.firms['production_per_tick'] = self.config['firm_production_per_tick']
+        logger.debug("Created %d firms in a NumPy array.", self.config['N_F'])
 
-        # Get a list of firm IDs to assign workers to
-        firm_ids = list(self.firms.keys())
+        # --- Define data structure for Households ---
+        household_dtype = [
+            ('balance', 'f8'),
+            ('size', 'i4'),
+            ('employer_id', 'i4')
+        ]
+        self.households = np.zeros(self.config['N_H'], dtype=household_dtype)
 
-        # Create Households
-        initial_balance = self.config['M0'] / self.config['N_H']
+        # --- Initialize Household data ---
+        self.households['balance'] = self.config['M0'] / self.config['N_H']
+        self.households['size'] = self.config['household_size']
+        
+        # Assign households to firms and count workers per firm
+        # Reverting to `random.choice` in a loop to ensure deterministic
+        # behavior identical to the original implementation.
+        firm_ids_list = list(range(self.config['N_F']))
+        assigned_employers = np.zeros(self.config['N_H'], dtype=int)
         for i in range(self.config['N_H']):
-            # Create the household
-            self.households[i] = Household(id=i, balance=initial_balance, size=self.config['household_size'])
-            
-            # Assign the household to a random firm
-            employer_firm_id = random.choice(firm_ids)
-            self.households[i].employer_id = employer_firm_id
-            self.firms[employer_firm_id].add_worker(i)
+            assigned_employers[i] = random.choice(firm_ids_list)
+        
+        self.households['employer_id'] = assigned_employers
+        
+        # Count number of workers for each firm efficiently
+        ids, counts = np.unique(assigned_employers, return_counts=True)
+        self.firms['num_workers'][ids] = counts
+        
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")
 
-    def _get_closest_firm(self, household_id):
-        """Finds the firm geographically closest to a given household."""
-        if not self.firm_positions or not self.household_positions:
-            return None # Should not happen if configured correctly
-
-        hh_pos = self.household_positions[household_id]
-        closest_firm = None
-        min_dist_sq = float('inf')
-
-        for firm_id, firm_pos in self.firm_positions.items():
-            dist_sq = (hh_pos[0] - firm_pos[0])**2 + (hh_pos[1] - firm_pos[1])**2
-            if dist_sq < min_dist_sq:
-                min_dist_sq = dist_sq
-                closest_firm = self.firms[firm_id]
+    def _vectorized_find_closest_firms(self):
+        """
+        Finds the closest firm for all households in a single vectorized operation.
+        This is significantly faster than looping through each household.
+        """
+        # Use broadcasting to calculate squared distances between all households and all firms
+        # household_pos_array is (N_H, 2) -> (N_H, 1, 2)
+        # firm_pos_array is (N_F, 2) -> (1, N_F, 2)
+        # The result of subtraction is a (N_H, N_F, 2) array
+        diffs = self.household_pos_array[:, np.newaxis, :] - self.firm_pos_array[np.newaxis, :, :]
+        dist_sq = np.sum(diffs**2, axis=2) # Sum along the x,y dimension
         
-        if closest_firm:
-            logger.debug(
-                "Household %d evaluating firms... Found closest: Firm %d (Distance: %.1f)",
-                household_id, closest_firm.id, math.sqrt(min_dist_sq)
-            )
-        return closest_firm
+        # Find the index of the minimum distance for each household
+        return np.argmin(dist_sq, axis=1)
 
     def run_one_tick(self):
         """
-        Executes one full cycle of the simulation loop.
+        Executes one full cycle of the simulation using vectorized operations.
         Returns a list of transactions that occurred.
         """
-        firm_list = list(self.firms.values())
         transactions_this_tick = []
 
-        # 1. Production Phase
+        # 1. Production Phase (Vectorized)
         logger.debug("Start Production Phase")
-        for f in self.firms.values():
-            f.produce_goods()
+        self.firms['inventory'] += self.firms['production_per_tick']
 
         # 2. Shopping Phase
         logger.debug("Start Shopping Phase")
-        for hh in self.households.values():
-            chosen_firm = None
-            if self.config.get('enable_proximity_choice', False):
-                chosen_firm = self._get_closest_firm(hh.id)
-            else:
-                # Fallback to original random choice behavior
-                chosen_firm = random.choice(firm_list)
+        
+        # --- Determine which firm each household will shop at (Vectorized) ---
+        if self.config.get('enable_proximity_choice', False):
+            chosen_firm_ids = self._vectorized_find_closest_firms()
+        else:
+            # Reverting to `random.choice` in a loop to ensure deterministic
+            # behavior identical to the original implementation.
+            firm_ids_list = list(range(self.config['N_F']))
+            chosen_firm_ids = np.array([random.choice(firm_ids_list) for _ in range(self.config['N_H'])])
+        
+        # --- Calculate purchase requests for all households (Vectorized) ---
+        requested_qty = self.households['size'] * self.config['food_per_person']
+        firm_prices = self.firms['price'][chosen_firm_ids]
+        max_affordable_qty = (self.households['balance'] / firm_prices).astype(int)
+        purchase_request_qty = np.minimum(requested_qty, max_affordable_qty)
 
-            if not chosen_firm:
-                logger.warning("Household %d could not choose a firm. Skipping.", hh.id)
+        # --- Process sales iteratively (to handle inventory correctly) ---
+        # This loop is kept to prevent race conditions where multiple households
+        # buy from the same firm's inventory simultaneously in a vectorized op.
+        for hh_id in range(self.config['N_H']):
+            firm_id = chosen_firm_ids[hh_id]
+            request = purchase_request_qty[hh_id]
+
+            if request <= 0:
                 continue
+
+            firm_inventory = self.firms['inventory'][firm_id]
+            if firm_inventory <= 0:
+                continue
+
+            sold_quantity = min(request, firm_inventory)
             
-            # Household determines what it wants and can afford
-            requested_qty = hh.determine_food_demand(self.config['food_per_person'])
-            max_affordable_qty = int(hh.balance / chosen_firm.price)
-            purchase_request_qty = min(requested_qty, max_affordable_qty)
+            # Update inventory and balances
+            amount = sold_quantity * self.firms['price'][firm_id]
+            self.households['balance'][hh_id] -= amount
+            self.firms['inventory'][firm_id] -= sold_quantity
+            self.firms['revenue_this_tick'][firm_id] += amount
+            
+            transactions_this_tick.append({
+                'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount
+            })
+            logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f, Qty: %d", hh_id, firm_id, amount, sold_quantity)
 
-            # Firm processes the sale based on its inventory
-            actual_qty_sold = chosen_firm.process_sale(purchase_request_qty)
-
-            if actual_qty_sold > 0:
-                # A transaction occurred, record it
-                amount = actual_qty_sold * chosen_firm.price
-                hh.balance -= amount # Manually update balance
-                chosen_firm.receive_payment(amount)
-                transactions_this_tick.append({
-                    'type': 'spending',
-                    'from_id': hh.id,
-                    'to_id': chosen_firm.id,
-                    'amount': amount
-                })
-                logger.debug("Transaction: Household %d -> Firm %d, Amount: %.2f, Qty: %d", hh.id, chosen_firm.id, amount, actual_qty_sold)
-
-        # 2. Payday Phase
+        # 3. Payday Phase (Vectorized)
         logger.debug("Start Payday Phase")
-        for f in self.firms.values():
-            wage_transactions = f.pay_workers(self.households)
-            transactions_this_tick.extend(wage_transactions) # Add wage payments to the list
+        
+        # Calculate total wage payout per firm
+        total_payout = self.firms['revenue_this_tick'] * self.firms['wage_rate']
+        
+        # Update firm balances (revenue is now banked)
+        self.firms['balance'] += self.firms['revenue_this_tick'] - total_payout
+        self.firms['revenue_this_tick'][:] = 0 # Reset for next tick
+        
+        # Calculate wage per worker for each firm, handling firms with no workers
+        num_workers = self.firms['num_workers']
+        wage_per_worker = np.divide(total_payout, num_workers, out=np.zeros_like(total_payout), where=num_workers!=0)
+        
+        # Distribute wages to all households based on their employer
+        payouts_to_households = wage_per_worker[self.households['employer_id']]
+        self.households['balance'] += payouts_to_households
+        
+        # Create wage transaction logs
+        for firm_id, payout in enumerate(total_payout):
+            if payout > 0:
+                # Find all workers for this firm
+                worker_ids = np.where(self.households['employer_id'] == firm_id)[0]
+                individual_wage = wage_per_worker[firm_id]
+                for worker_id in worker_ids:
+                    transactions_this_tick.append({
+                        'type': 'wage', 'from_id': firm_id, 'to_id': int(worker_id), 'amount': individual_wage
+                    })
             
         return transactions_this_tick

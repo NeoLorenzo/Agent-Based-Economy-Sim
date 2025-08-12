@@ -157,8 +157,11 @@ def draw_agent_bodies(surface, agent_positions, color):
 
 def update_graph_data(graph_data, sim):
     """Appends the current inventory of each firm to the historical data deque."""
-    for firm_id, firm in sim.firms.items():
-        graph_data[firm_id].append(firm.inventory)
+    # Access the entire 'inventory' column from the NumPy array
+    inventories = sim.firms['inventory']
+    # Enumerate through the inventories to get the firm_id (index) and value
+    for firm_id, inventory_value in enumerate(inventories):
+        graph_data[firm_id].append(inventory_value)
 
 def draw_graph(surface, graph_data, config, font):
     """Draws a dynamic, auto-scaling graph with axes, labels, and a legend."""
@@ -300,9 +303,10 @@ def main():
     sim = Simulation(config, firm_positions, household_positions)
     
     # Initialize data structure for the graph
+    # We now iterate from 0 to N-1, as sim.firms is a NumPy array.
     graph_data = {
         firm_id: collections.deque(maxlen=C.GRAPH_MAX_HISTORY)
-        for firm_id in sim.firms.keys()
+        for firm_id in range(len(sim.firms))
     }
     
     active_particles = []
