@@ -63,9 +63,8 @@ class Particle:
 #======================================
 def calculate_agent_positions(sim):
     """
-    Calculates random screen positions for all firms and households.
-    This abstraction moves away from an artificial grid layout to a more
-    organic, random distribution, which is a step towards greater realism.
+    Calculates random screen positions for all firms and households, ensuring
+    they do not overlap. This uses rejection sampling to find valid positions.
     """
     firm_positions = {}
     hh_positions = {}
@@ -74,27 +73,47 @@ def calculate_agent_positions(sim):
     num_households = len(sim.households)
     total_agents = num_firms + num_households
 
-    # Generate all possible positions at once using NumPy for efficiency (Rule 12)
-    # This creates a more organic, realistic distribution of agents (Rule 3)
-    rand_x = np.random.randint(C.SCREEN_PADDING, C.SCREEN_WIDTH - C.SCREEN_PADDING, total_agents)
-    rand_y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING, total_agents)
-    all_positions = list(zip(rand_x, rand_y))
+    # Define minimum distance to prevent overlap, using squared distance for efficiency.
+    # This is derived from constants to adhere to Rule 1.
+    min_dist = 5 * (C.AGENT_RADIUS + C.AGENT_OUTLINE_WIDTH)
+    min_dist_sq = min_dist ** 2
     
+    generated_positions = []
+
+    for _ in range(total_agents):
+        while True:
+            # Generate a new candidate position (Rule 12)
+            x = np.random.randint(C.SCREEN_PADDING, C.SCREEN_WIDTH - C.SCREEN_PADDING)
+            y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING)
+            candidate_pos = (x, y)
+            
+            # Check for collisions with all previously placed agents
+            is_valid = True
+            for pos in generated_positions:
+                dist_sq = (pos[0] - candidate_pos[0])**2 + (pos[1] - candidate_pos[1])**2
+                if dist_sq < min_dist_sq:
+                    is_valid = False
+                    break # Collision detected, generate a new position
+            
+            if is_valid:
+                generated_positions.append(candidate_pos)
+                break # Position is valid, move to the next agent
+
     # Shuffle the list of generated positions to ensure random assignment
-    random.shuffle(all_positions)
+    random.shuffle(generated_positions)
 
     # Assign positions to firms
     firm_ids = list(sim.firms.keys())
     for i in range(num_firms):
         firm_id = firm_ids[i]
-        position = all_positions.pop()
+        position = generated_positions.pop()
         firm_positions[firm_id] = position
 
     # Assign the remaining positions to households
     household_ids = list(sim.households.keys())
     for i in range(num_households):
         household_id = household_ids[i]
-        position = all_positions.pop()
+        position = generated_positions.pop()
         hh_positions[household_id] = position
         
     return firm_positions, hh_positions
