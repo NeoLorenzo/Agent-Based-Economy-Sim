@@ -69,20 +69,17 @@ class Simulation:
         self.households['balance'] = self.config['M0'] / self.config['N_H']
         self.households['size'] = self.config['household_size']
         
-        # Assign households to firms and count workers per firm
-        # Reverting to `random.choice` in a loop to ensure deterministic
-        # behavior identical to the original implementation.
-        firm_ids_list = list(range(self.config['N_F']))
-        assigned_employers = np.zeros(self.config['N_H'], dtype=int)
-        for i in range(self.config['N_H']):
-            assigned_employers[i] = random.choice(firm_ids_list)
+        # All households start as unemployed. Firms will hire them in the
+        # first few ticks based on their initial capital and revenue potential.
+        self.households['employer_id'] = -1 # -1 signifies unemployed
         
-        self.households['employer_id'] = assigned_employers
-        
-        # Count number of workers for each firm efficiently
-        ids, counts = np.unique(assigned_employers, return_counts=True)
-        self.firms['num_workers'][ids] = counts
-        self.firms['target_num_workers'] = self.firms['num_workers'].copy() # Initialize target
+        # All firms start with zero workers but have a target number of workers.
+        # This target can be adjusted later based on performance.
+        self.firms['num_workers'] = 0
+        # For now, let's assume firms want to hire a proportional share of the workforce.
+        # This is an initial target; their actual hiring will be constrained by revenue.
+        initial_target_workers = math.ceil(self.config['N_H'] / self.config['N_F'])
+        self.firms['target_num_workers'] = initial_target_workers
         
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")

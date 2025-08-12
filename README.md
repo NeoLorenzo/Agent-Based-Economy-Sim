@@ -46,8 +46,8 @@ The current version of the simulation is a minimal viable product (MVP) designed
     *   **Limitation:** This model is a significant step up from simple proximity or random choice, but it still lacks factors like brand loyalty, product quality differences, or the influence of advertising. All goods are treated as perfect substitutes.
 
 2.  **Labor Market:**
-    *   **Abstraction:** At the start of the simulation, each household is assigned to a single firm as its permanent employer.
-    *   **Limitation:** There is no concept of a labor market. Households cannot be unemployed, switch jobs, or negotiate wages. Firms cannot hire or fire workers based on their needs.
+    *   **Abstraction:** The simulation now features a dynamic labor market. All households start as unemployed. In each tick, firms with sufficient revenue and capital can hire workers from the unemployed pool. Conversely, firms with critically low capital will lay off workers. This creates a fluid workforce where firms compete for labor and households can move between being employed and unemployed.
+    *   **Limitation:** The model does not yet include wage negotiation, skills, or job-seeking behavior from households (they are hired passively). Wages are still determined as a fixed percentage of firm revenue, not by labor supply and demand.
 
 3.  **Firm Restocking & Inventory:**
     *   **Abstraction:** Firms act as retailers. They do not produce goods. Instead, they purchase inventory from an abstract, infinite "wholesale market" at a fixed `wholesale_price`. Each firm attempts to maintain a `target_inventory` level. If its current inventory drops below this target, it orders more goods, limited by its available cash balance.
