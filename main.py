@@ -84,7 +84,7 @@ def calculate_agent_positions(num_firms, num_households):
     for _ in range(total_agents):
         while True:
             # Generate a new candidate position, avoiding the graph area (Rule 12)
-            min_x = C.GRAPH_X + C.GRAPH_WIDTH + C.SCREEN_PADDING
+            min_x = C.INVENTORY_GRAPH_X + C.GRAPH_WIDTH + C.SCREEN_PADDING
             x = np.random.randint(min_x, C.SCREEN_WIDTH - C.SCREEN_PADDING)
             y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING)
             candidate_pos = (x, y)
@@ -163,26 +163,41 @@ def update_graph_data(graph_data, sim):
     for firm_id, inventory_value in enumerate(inventories):
         graph_data[firm_id].append(inventory_value)
 
-def draw_graph(surface, graph_data, config, font):
+def update_price_graph_data(price_graph_data, sim):
+    """Appends the current price of each firm to the historical data list."""
+    prices = sim.firms['price']
+    for firm_id, price_value in enumerate(prices):
+        price_graph_data[firm_id].append(price_value)
+
+def draw_graph(surface, graph_data, font, x, y, width, height, title):
     """Draws a dynamic, auto-scaling graph with axes, labels, and a legend."""
     # 1. Draw background and border
-    graph_rect = pygame.Rect(C.GRAPH_X, C.GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT)
+    graph_rect = pygame.Rect(x, y, width, height)
     pygame.draw.rect(surface, C.GRAPH_BG_COLOR, graph_rect)
     pygame.draw.rect(surface, C.GRAPH_AXIS_COLOR, graph_rect, 1)
 
     # 2. Define plot area, leaving space for labels
-    plot_start_x = C.GRAPH_X + C.GRAPH_AXIS_LABEL_PADDING
-    plot_start_y = C.GRAPH_Y + C.GRAPH_PADDING
-    plot_area_width = C.GRAPH_WIDTH - C.GRAPH_AXIS_LABEL_PADDING - C.GRAPH_PADDING
-    plot_area_height = C.GRAPH_HEIGHT - 2 * C.GRAPH_PADDING
+    plot_start_x = x + C.GRAPH_AXIS_LABEL_PADDING
+    plot_start_y = y + C.GRAPH_PADDING
+    plot_area_width = width - C.GRAPH_AXIS_LABEL_PADDING - C.GRAPH_PADDING
+    plot_area_height = height - 2 * C.GRAPH_PADDING
 
     # 3. Dynamically determine Y-axis scale based on visible data
     max_y_val = 1 # Start with a minimum value
-    for history in graph_data.values():
-        if history:
-            max_y_val = max(max_y_val, max(history))
-    max_y_val *= 1.1  # Add a 10% buffer to the top
-    if max_y_val < 10: max_y_val = 10 # Ensure a minimum sensible scale
+    min_y_val = 0 # Start with a minimum value
+    has_data = any(history for history in graph_data.values())
+    if has_data:
+        max_y_val = max(max(h) for h in graph_data.values() if h)
+        min_y_val = min(min(h) for h in graph_data.values() if h)
+
+    # Add a buffer and ensure the range is not zero
+    y_range = max_y_val - min_y_val
+    if y_range == 0: y_range = 1
+    max_y_val += y_range * 0.1
+    min_y_val -= y_range * 0.1
+    if min_y_val < 0: min_y_val = 0 # Don't let the floor go below zero for most economic data
+    if max_y_val == min_y_val: max_y_val = min_y_val + 1
+
 
     # 4. Draw Axes and Labels
     # Y-Axis Line
@@ -195,21 +210,15 @@ def draw_graph(surface, graph_data, config, font):
     pygame.draw.line(surface, C.GRAPH_AXIS_COLOR, x_axis_start, x_axis_end)
 
     # Y-Axis Labels
-    max_y_text = font.render(f"{int(max_y_val)}", True, C.GRAPH_FONT_COLOR)
+    max_y_text = font.render(f"{max_y_val:.1f}", True, C.GRAPH_FONT_COLOR)
     surface.blit(max_y_text, (plot_start_x - max_y_text.get_width() - 5, plot_start_y - 7))
-    min_y_text = font.render("0", True, C.GRAPH_FONT_COLOR)
+    min_y_text = font.render(f"{min_y_val:.1f}", True, C.GRAPH_FONT_COLOR)
     surface.blit(min_y_text, (plot_start_x - min_y_text.get_width() - 5, plot_start_y + plot_area_height - 7))
 
-    # 5. Draw each firm's inventory line
-    # Determine the total number of ticks to display on the X-axis.
-    # We find the longest history in case of uneven data, though they should be the same.
-    num_ticks_to_display = 0
-    for history in graph_data.values():
-        num_ticks_to_display = max(num_ticks_to_display, len(history))
+    # 5. Draw each firm's data line
+    num_ticks_to_display = max(len(h) for h in graph_data.values()) if has_data else 0
 
-    # Only proceed to draw lines if there's more than one data point.
     if num_ticks_to_display > 1:
-        # The space between points is the total width divided by the number of intervals.
         spacing_x = plot_area_width / (num_ticks_to_display - 1)
         
         for i, (firm_id, history) in enumerate(graph_data.items()):
@@ -217,21 +226,19 @@ def draw_graph(surface, graph_data, config, font):
             if len(history) < 2:
                 continue
 
-            # Map each data point in the history to a screen coordinate.
             points = []
             for tick_index, value in enumerate(history):
-                x = plot_start_x + tick_index * spacing_x
-                y = plot_start_y + plot_area_height * (1 - (value / max_y_val))
-                points.append((x, y))
+                px = plot_start_x + tick_index * spacing_x
+                py = plot_start_y + plot_area_height * (1 - ((value - min_y_val) / (max_y_val - min_y_val)))
+                points.append((px, py))
             
-            # Draw the compressed line for the firm's full history.
             pygame.draw.lines(surface, color, False, points, C.GRAPH_LINE_WIDTH)
 
     # 6. Draw Title and Legend
-    title_text = font.render("Firm Inventory", True, C.GRAPH_FONT_COLOR)
-    surface.blit(title_text, (plot_start_x + 5, C.GRAPH_Y + 5))
-    legend_start_x = C.GRAPH_X + C.GRAPH_WIDTH - C.GRAPH_PADDING - 70
-    legend_start_y = C.GRAPH_Y + C.GRAPH_PADDING
+    title_text = font.render(title, True, C.GRAPH_FONT_COLOR)
+    surface.blit(title_text, (plot_start_x + 5, y + 5))
+    legend_start_x = x + width - C.GRAPH_PADDING - 70
+    legend_start_y = y + C.GRAPH_PADDING
     for i, firm_id in enumerate(graph_data.keys()):
         color = C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)]
         text_surface = font.render(f"Firm {firm_id}", True, C.GRAPH_FONT_COLOR)
@@ -239,44 +246,53 @@ def draw_graph(surface, graph_data, config, font):
         pygame.draw.rect(surface, color, (legend_start_x, item_y, 10, 10))
         surface.blit(text_surface, (legend_start_x + 15, item_y - 2))
 
-def display_inventory_graph(graph_data):
+def display_final_graphs(inventory_data, price_data):
     """
-    Displays the firm inventory history in a Matplotlib window.
-    The plot is styled to closely match the in-sim graph.
+    Displays the firm inventory and price history in a Matplotlib window.
+    The plots are styled to closely match the in-sim graphs.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Displaying final inventory graph...")
+    logger.info("Displaying final inventory and price graphs...")
 
-    # Helper to convert Pygame RGB (0-255) to Matplotlib float (0-1)
     to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
-
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(8, 6)) # Create a figure and an axes
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True) # 2 rows, 1 column
 
-    # Plot each firm's data
-    for i, (firm_id, history) in enumerate(graph_data.items()):
+    # --- Plot 1: Inventory ---
+    for i, (firm_id, history) in enumerate(inventory_data.items()):
         color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
-        ax.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
-
-    # --- Style the plot to match the simulation ---
-    ax.set_title("Firm Inventory", fontsize=14)
-    ax.set_xlabel("Tick", fontsize=10)
-    ax.set_ylabel("Inventory", fontsize=10)
-    ax.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
-    ax.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
-    ax.legend()
+        ax1.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
     
-    # Set axis and tick colors
-    axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
-    tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
-    ax.spines['top'].set_color(axis_color)
-    ax.spines['bottom'].set_color(axis_color)
-    ax.spines['left'].set_color(axis_color)
-    ax.spines['right'].set_color(axis_color)
-    ax.tick_params(axis='x', colors=tick_color)
-    ax.tick_params(axis='y', colors=tick_color)
+    ax1.set_title("Firm Inventory Over Time", fontsize=14)
+    ax1.set_ylabel("Inventory", fontsize=10)
+    ax1.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax1.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax1.legend()
 
-    # --- Display the plot ---
+    # --- Plot 2: Price ---
+    for i, (firm_id, history) in enumerate(price_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax2.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+
+    ax2.set_title("Firm Price Over Time", fontsize=14)
+    ax2.set_xlabel("Tick", fontsize=10)
+    ax2.set_ylabel("Price", fontsize=10)
+    ax2.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax2.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax2.legend()
+
+    # --- Style and Show ---
+    for ax in [ax1, ax2]:
+        axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
+        tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
+        ax.spines['top'].set_color(axis_color)
+        ax.spines['bottom'].set_color(axis_color)
+        ax.spines['left'].set_color(axis_color)
+        ax.spines['right'].set_color(axis_color)
+        ax.tick_params(axis='x', colors=tick_color)
+        ax.tick_params(axis='y', colors=tick_color)
+
+    fig.tight_layout()
     try:
         plt.show()
     except Exception as e:
@@ -315,11 +331,13 @@ def main():
     # Now, create the final simulation object with the position data
     sim = Simulation(config, firm_positions, household_positions)
     
-    # Initialize data structure for the graph
-    # We now iterate from 0 to N-1, as sim.firms is a NumPy array.
-    graph_data = {
-        firm_id: []
-        for firm_id in range(len(sim.firms))
+    # Initialize data structures for the graphs
+    # We iterate from 0 to N-1, as sim.firms is a NumPy array.
+    inventory_graph_data = {
+        firm_id: [] for firm_id in range(len(sim.firms))
+    }
+    price_graph_data = {
+        firm_id: [] for firm_id in range(len(sim.firms))
     }
     
     active_particles = []
@@ -350,7 +368,8 @@ def main():
                 context_filter.tick = tick_counter
                 logger.debug("Running simulation tick %d", tick_counter)
                 transactions = sim.run_one_tick()
-                update_graph_data(graph_data, sim) # Capture inventory state for the graph
+                update_graph_data(inventory_graph_data, sim) # Capture inventory state
+                update_price_graph_data(price_graph_data, sim) # Capture price state
                 
                 # Create new particles for each transaction
                 for trans in transactions:
@@ -377,8 +396,9 @@ def main():
             screen.fill(C.COLOR_BACKGROUND)
             draw_grid(screen)
             
-            # Draw the graph on the left side
-            draw_graph(screen, graph_data, config, font)
+            # Draw the graphs on the left side
+            draw_graph(screen, inventory_graph_data, font, C.INVENTORY_GRAPH_X, C.INVENTORY_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Inventory")
+            draw_graph(screen, price_graph_data, font, C.PRICE_GRAPH_X, C.PRICE_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Price")
             
             # 1. Draw shadows first, so they are under everything else
             draw_agent_shadows(screen, firm_positions)
@@ -402,7 +422,7 @@ def main():
     finally:
         # --- Shutdown ---
         logger.info("Simulation loop ended. Shutting down.")
-        display_inventory_graph(graph_data)
+        display_final_graphs(inventory_graph_data, price_graph_data)
         pygame.quit()
         sys.exit()
 

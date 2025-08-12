@@ -46,15 +46,23 @@ AGENT_OUTLINE_WIDTH = 2 # Width of the agent's outline in pixels
 # GRAPH VISUALIZATION SETTINGS
 #======================================
 GRAPH_WIDTH = 300
-GRAPH_HEIGHT = 250
-GRAPH_X = 20
-GRAPH_Y = 20
+GRAPH_HEIGHT = 200 # Reduced height to fit two graphs
 GRAPH_PADDING = 20
 GRAPH_AXIS_LABEL_PADDING = 30 # Space on the left for Y-axis labels
 GRAPH_BG_COLOR = (40, 45, 50)
 GRAPH_AXIS_COLOR = (150, 150, 150)
 GRAPH_FONT_COLOR = (200, 200, 200)
 GRAPH_LINE_WIDTH = 2
+GRAPH_SPACING = 30 # Vertical space between graphs
+
+# --- Inventory Graph ---
+INVENTORY_GRAPH_X = 20
+INVENTORY_GRAPH_Y = 20
+
+# --- Price Graph ---
+PRICE_GRAPH_X = 20
+PRICE_GRAPH_Y = INVENTORY_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
+
 # A list of distinct colors for the firm graph lines
 GRAPH_LINE_COLORS = [
     (52, 152, 219),  # Peter River
