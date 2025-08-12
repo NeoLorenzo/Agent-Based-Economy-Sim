@@ -23,27 +23,6 @@ class Household:
         """Calculates how much food the household wants to buy."""
         return self.size * food_per_person
 
-    def place_order_and_pay(self, price, food_per_person):
-        """
-        DEPRECATED: This logic is now handled in the main simulation loop
-        to better coordinate with firm inventory.
-        Calculates food demand, determines what can be afforded,
-        and returns the quantity purchased. Updates balance.
-        """
-        food_demand = self.determine_food_demand(food_per_person)
-        cost = food_demand * price
-
-        if self.balance >= cost:
-            # Can afford the desired amount
-            purchased_quantity = food_demand
-            self.balance -= cost
-            return purchased_quantity
-        else:
-            # Cannot afford, buys as much as possible
-            purchased_quantity = int(self.balance / price) # floor division
-            self.balance -= purchased_quantity * price
-            return purchased_quantity
-
 class Firm:
     """Represents a firm that produces goods and employs households."""
     def __init__(self, id, price, wage_rate, production_per_tick):

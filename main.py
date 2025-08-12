@@ -62,7 +62,7 @@ class Particle:
 #======================================
 # HELPER FUNCTIONS
 #======================================
-def calculate_agent_positions(sim):
+def calculate_agent_positions(num_firms, num_households):
     """
     Calculates random screen positions for all firms and households, ensuring
     they do not overlap. This uses rejection sampling to find valid positions.
@@ -70,8 +70,6 @@ def calculate_agent_positions(sim):
     firm_positions = {}
     hh_positions = {}
     
-    num_firms = len(sim.firms)
-    num_households = len(sim.households)
     total_agents = num_firms + num_households
 
     # Define minimum distance to prevent overlap, using squared distance for efficiency.
@@ -104,15 +102,15 @@ def calculate_agent_positions(sim):
     # Shuffle the list of generated positions to ensure random assignment
     random.shuffle(generated_positions)
 
-    # Assign positions to firms
-    firm_ids = list(sim.firms.keys())
+    # Assign positions to firms, assuming IDs are 0 to N-1
+    firm_ids = list(range(num_firms))
     for i in range(num_firms):
         firm_id = firm_ids[i]
         position = generated_positions.pop()
         firm_positions[firm_id] = position
 
-    # Assign the remaining positions to households
-    household_ids = list(sim.households.keys())
+    # Assign the remaining positions to households, assuming IDs are 0 to N-1
+    household_ids = list(range(num_households))
     for i in range(num_households):
         household_id = household_ids[i]
         position = generated_positions.pop()
@@ -248,12 +246,10 @@ def main():
     np.random.seed(master_seed)
     logger.info("RNGs seeded with master seed: %d", master_seed)
     
-    # Calculate static agent positions once before creating the simulation object
-    # This requires a temporary instance of the simulation to know agent counts,
-    # which is slightly inefficient but clean. A future refactor could address this.
-    temp_sim = Simulation(config)
-    firm_positions, household_positions = calculate_agent_positions(temp_sim)
-    del temp_sim # clean up temporary object
+    # Calculate static agent positions once by passing agent counts from the config.
+    firm_positions, household_positions = calculate_agent_positions(
+        config['N_F'], config['N_H']
+    )
 
     # Now, create the final simulation object with the position data
     sim = Simulation(config, firm_positions, household_positions)
