@@ -1,6 +1,6 @@
 {
   "N_H": 200,
-  "N_F": 5,
+  "N_F": 2,
   "wage_rate": 5.0,
   "enable_dynamic_wages": true,
   "wage_adjustment_sensitivity": 0.1,
