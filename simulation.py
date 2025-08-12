@@ -115,23 +115,26 @@ class Simulation:
         This method is called once per tick by the main loop.
 
         Returns:
-            tuple: A tuple containing three dictionaries:
+            tuple: A tuple containing four dictionaries:
                    - inventory_data (dict): {firm_id: [history]}
                    - price_data (dict): {firm_id: [history]}
                    - capital_data (dict): {firm_id: [history]}
+                   - employee_data (dict): {firm_id: [history]}
         """
         # Initialize on first call
         if not hasattr(self, '_inventory_history'):
             self._inventory_history = {i: [] for i in range(self.config['N_F'])}
             self._price_history = {i: [] for i in range(self.config['N_F'])}
             self._capital_history = {i: [] for i in range(self.config['N_F'])}
+            self._employee_history = {i: [] for i in range(self.config['N_F'])}
 
         for i in range(self.config['N_F']):
             self._inventory_history[i].append(self.firms['inventory'][i])
             self._price_history[i].append(self.firms['price'][i])
             self._capital_history[i].append(self.firms['balance'][i])
+            self._employee_history[i].append(self.firms['num_workers'][i])
 
-        return self._inventory_history, self._price_history, self._capital_history
+        return self._inventory_history, self._price_history, self._capital_history, self._employee_history
 
     def run_one_tick(self):
         """

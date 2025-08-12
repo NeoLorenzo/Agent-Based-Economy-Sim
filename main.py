@@ -81,16 +81,16 @@ def calculate_agent_positions(num_firms, num_households):
         
     return firm_positions, hh_positions
 
-def display_final_graphs(inventory_data, price_data, capital_data):
+def display_final_graphs(inventory_data, price_data, capital_data, employee_data):
     """
-    Displays the firm inventory, price, and capital history in a Matplotlib window.
+    Displays the firm inventory, price, capital, and employee history in a Matplotlib window.
     """
     logger = logging.getLogger(__name__)
-    logger.info("Displaying final inventory, price, and capital graphs...")
+    logger.info("Displaying final inventory, price, capital, and employee graphs...")
 
     to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
     plt.style.use('dark_background')
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 
     # Plot 1: Inventory
     for i, (firm_id, history) in enumerate(inventory_data.items()):
@@ -124,7 +124,18 @@ def display_final_graphs(inventory_data, price_data, capital_data):
     ax3.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
     ax3.legend()
 
-    for ax in [ax1, ax2, ax3]:
+    # Plot 4: Employees
+    for i, (firm_id, history) in enumerate(employee_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax4.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH, drawstyle='steps-post')
+    ax4.set_title("Firm Employees Over Time", fontsize=14)
+    ax4.set_xlabel("Tick", fontsize=10)
+    ax4.set_ylabel("Employees", fontsize=10)
+    ax4.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax4.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax4.legend()
+
+    for ax in [ax1, ax2, ax3, ax4]:
         axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
         tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
         ax.spines['top'].set_color(axis_color)
@@ -171,6 +182,7 @@ def main():
     inventory_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     price_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     capital_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
+    employee_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     
     active_particles = []
     tick_counter = 0
@@ -206,7 +218,7 @@ def main():
                         summary['unemployment_rate']
                     )
 
-                inventory_graph_data, price_graph_data, capital_graph_data = sim.update_and_get_firm_data_for_render()
+                inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data = sim.update_and_get_firm_data_for_render()
                 
                 for trans in transactions:
                     start_pos, end_pos, color = None, None, None
@@ -226,6 +238,7 @@ def main():
             viz.draw_graph(screen, inventory_graph_data, font, C.INVENTORY_GRAPH_X, C.INVENTORY_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Inventory")
             viz.draw_graph(screen, price_graph_data, font, C.PRICE_GRAPH_X, C.PRICE_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Price")
             viz.draw_graph(screen, capital_graph_data, font, C.CAPITAL_GRAPH_X, C.CAPITAL_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Capital")
+            viz.draw_graph(screen, employee_graph_data, font, C.EMPLOYEE_GRAPH_X, C.EMPLOYEE_GRAPH_Y, C.GRAPH_WIDTH, C.GRAPH_HEIGHT, "Firm Employees")
             
             viz.draw_agent_shadows(screen, firm_positions)
             viz.draw_agent_shadows(screen, household_positions)
@@ -249,7 +262,7 @@ def main():
         logger.critical("Unhandled exception in main loop, shutting down.", exc_info=True)
     finally:
         logger.info("Simulation loop ended. Shutting down.")
-        display_final_graphs(inventory_graph_data, price_graph_data, capital_graph_data)
+        display_final_graphs(inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data)
         pygame.quit()
         sys.exit()
 

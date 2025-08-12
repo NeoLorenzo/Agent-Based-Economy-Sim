@@ -50,14 +50,14 @@ FONT_SIZE = 12
 # GRAPH VISUALIZATION SETTINGS
 #======================================
 GRAPH_WIDTH = 300
-GRAPH_HEIGHT = 200 # Reduced height to fit two graphs
+GRAPH_HEIGHT = 150 # Reduced height to fit four graphs
 GRAPH_PADDING = 20
 GRAPH_AXIS_LABEL_PADDING = 30 # Space on the left for Y-axis labels
 GRAPH_BG_COLOR = (40, 45, 50)
 GRAPH_AXIS_COLOR = (150, 150, 150)
 GRAPH_FONT_COLOR = (200, 200, 200)
 GRAPH_LINE_WIDTH = 2
-GRAPH_SPACING = 30 # Vertical space between graphs
+GRAPH_SPACING = 25 # Vertical space between graphs
 
 # --- Inventory Graph ---
 INVENTORY_GRAPH_X = 20
@@ -70,6 +70,10 @@ PRICE_GRAPH_Y = INVENTORY_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
 # --- Capital Graph ---
 CAPITAL_GRAPH_X = 20
 CAPITAL_GRAPH_Y = PRICE_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
+
+# --- Employee Graph ---
+EMPLOYEE_GRAPH_X = 20
+EMPLOYEE_GRAPH_Y = CAPITAL_GRAPH_Y + GRAPH_HEIGHT + GRAPH_SPACING
 
 # A list of distinct colors for the firm graph lines
 GRAPH_LINE_COLORS = [
