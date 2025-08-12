@@ -38,15 +38,22 @@ class Simulation:
             ('wage_rate', 'f8'),
             ('production_per_tick', 'i4'),
             ('inventory', 'i4'),
+            ('target_inventory', 'i4'),
             ('revenue_this_tick', 'f8'),
             ('num_workers', 'i4')
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
         # --- Initialize Firm data ---
+        self.firms['balance'] = self.config['firm_initial_capital']
         self.firms['price'] = self.config['p']
         self.firms['wage_rate'] = self.config['wage_rate']
         self.firms['production_per_tick'] = self.config['firm_production_per_tick']
+        self.firms['target_inventory'] = self.firms['production_per_tick'] * self.config['target_inventory_level_factor']
+        logger.info(
+            "Injected initial capital of %.2f into each of the %d firms.",
+            self.config['firm_initial_capital'], self.config['N_F']
+        )
         logger.debug("Created %d firms in a NumPy array.", self.config['N_F'])
 
         # --- Define data structure for Households ---
@@ -105,9 +112,36 @@ class Simulation:
         """
         transactions_this_tick = []
 
-        # 1. Production Phase (Vectorized)
-        logger.debug("Start Production Phase")
-        self.firms['inventory'] += self.firms['production_per_tick']
+        # 1. Wholesale Restocking Phase (Vectorized)
+        logger.debug("Start Wholesale Restocking Phase")
+        wholesale_price = self.config['wholesale_price']
+        
+        # Determine how much inventory each firm needs to order
+        needed_quantity = self.firms['target_inventory'] - self.firms['inventory']
+        needed_quantity[needed_quantity < 0] = 0 # Can't need negative inventory
+        
+        # Determine how much each firm can afford to order
+        affordable_quantity = (self.firms['balance'] / wholesale_price).astype(int)
+        
+        # The actual quantity ordered is the minimum of what's needed and what's affordable
+        ordered_quantity = np.minimum(needed_quantity, affordable_quantity)
+        
+        # Calculate the cost and update balances and inventory
+        order_cost = ordered_quantity * wholesale_price
+        self.firms['balance'] -= order_cost
+        self.firms['inventory'] += ordered_quantity
+        
+        # Log the restocking events
+        for firm_id, quantity in enumerate(ordered_quantity):
+            if quantity > 0:
+                logger.info(
+                    "Firm %d restocking. Target: %d, Current: %d, Ordered: %d, Cost: %.2f",
+                    firm_id,
+                    self.firms['target_inventory'][firm_id],
+                    self.firms['inventory'][firm_id] - quantity, # Log inventory before restock
+                    quantity,
+                    order_cost[firm_id]
+                )
 
         # 2. Shopping Phase
         logger.debug("Start Shopping Phase")

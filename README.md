@@ -49,9 +49,9 @@ The current version of the simulation is a minimal viable product (MVP) designed
     *   **Abstraction:** At the start of the simulation, each household is assigned to a single firm as its permanent employer.
     *   **Limitation:** There is no concept of a labor market. Households cannot be unemployed, switch jobs, or negotiate wages. Firms cannot hire or fire workers based on their needs.
 
-3.  **Firm Production & Inventory:**
-    *   **Abstraction:** Firms produce a fixed quantity of goods each tick, defined by `firm_production_per_tick` in `config.json`. This output is added to a finite inventory. When households make purchases, the quantity sold is limited by the firm's available inventory.
-    *   **Limitation:** Production is static and not based on demand, available capital, or labor. Firms cannot adjust their production levels in response to market signals (e.g., consistently sold-out inventory or bloating inventory). The cost of production is not modeled.
+3.  **Firm Restocking & Inventory:**
+    *   **Abstraction:** Firms act as retailers. They do not produce goods. Instead, they purchase inventory from an abstract, infinite "wholesale market" at a fixed `wholesale_price`. Each firm attempts to maintain a `target_inventory` level. If its current inventory drops below this target, it orders more goods, limited by its available cash balance.
+    *   **Limitation:** The wholesale market is a simplification. It has an infinite supply and a fixed price, meaning firms do not compete for wholesale goods. A firm's `target_inventory` is static and does not yet adapt to long-term sales trends. The cost of holding inventory is not modeled.
 
 4.  **Price & Wage Mechanisms:**
     *   **Price:** Firms now dynamically adjust the price of their goods based on inventory levels. If inventory falls below a configured threshold (signaling high demand), the firm raises its price. If inventory exceeds another threshold (signaling a surplus), it lowers the price. This behavior is controlled by `price_adjustment_rate` and inventory threshold factors in `config.json`.
