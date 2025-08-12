@@ -21,7 +21,7 @@ The simulation is built upon several key principles:
 ## Project Structure
 
 *   `main.py`: The main application entry point. Handles Pygame initialization, the main visualization loop, and user input.
-*   `simulation.py`: Contains the core simulation logic, including the `Household` and `Firm` agent classes and the main `Simulation` engine that manages the world state.
+*   `simulation.py`: Contains the core simulation logic. It uses high-performance NumPy structured arrays to manage agent data (instead of individual agent objects) and a central `Simulation` class to run the tick-based world state updates.
 *   `constants.py`: Defines static, framework-level constants (Rule 1.1).
 *   `config.json`: Defines the parameters for a specific economic experiment (Rule 1.2).
 *   `logging_setup.py`: Configures the application's logging system at startup, creating unique run directories and injecting contextual data into log messages as required by Rule 2.
@@ -50,8 +50,8 @@ The current version of the simulation is a minimal viable product (MVP) designed
     *   **Limitation:** There is no concept of a labor market. Households cannot be unemployed, switch jobs, or negotiate wages. Firms cannot hire or fire workers based on their needs.
 
 3.  **Firm Production & Inventory:**
-    *   **Abstraction:** Firms do not produce goods or manage inventory. They can sell an infinite quantity of their product. Their only economic activities are receiving payments and paying wages.
-    *   **Limitation:** This means firms cannot go bankrupt due to a lack of sales, nor can they fail to meet demand. Profitability is not linked to production efficiency or cost management.
+    *   **Abstraction:** Firms produce a fixed quantity of goods each tick, defined by `firm_production_per_tick` in `config.json`. This output is added to a finite inventory. When households make purchases, the quantity sold is limited by the firm's available inventory.
+    *   **Limitation:** Production is static and not based on demand, available capital, or labor. Firms cannot adjust their production levels in response to market signals (e.g., consistently sold-out inventory or bloating inventory). The cost of production is not modeled.
 
 4.  **Static Economic Variables:**
     *   **Abstraction:** Key economic variables—specifically the price of goods (`p`) and the proportion of revenue paid as wages (`wage_rate`)—are static values set in `config.json`.
