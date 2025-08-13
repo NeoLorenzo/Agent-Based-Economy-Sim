@@ -11,23 +11,68 @@ logger = logging.getLogger(__name__)
 # SIMULATION ENGINE
 #======================================
 
+import constants as C
+
 class Simulation:
     """
     Manages the overall simulation state and tick loop using NumPy for performance.
     Agent data is stored in structured NumPy arrays rather than individual objects.
     """
-    def __init__(self, config, firm_positions=None, household_positions=None, bank_positions=None):
+    def __init__(self, config):
         self.config = config
         
-        # Convert position dicts to NumPy arrays for vectorized calculations
-        self.firm_pos_array = np.array(list(firm_positions.values()))
-        self.household_pos_array = np.array(list(household_positions.values()))
-        self.bank_pos_array = np.array(list(bank_positions.values()))
-        
+        # Agent positions are now generated and stored internally
+        self.firm_positions = {}
+        self.household_positions = {}
+        self.bank_positions = {}
+        self.firm_pos_array = np.array([])
+        self.household_pos_array = np.array([])
+        self.bank_pos_array = np.array([])
+        self._calculate_agent_positions()
+
         self.households = None # Will be a NumPy structured array
         self.firms = None      # Will be a NumPy structured array
         self.banks = None      # Will be a NumPy structured array
         self._setup_world()
+
+    def _calculate_agent_positions(self):
+        """
+        Calculates and stores non-overlapping screen positions for all agents.
+        This is part of the simulation's internal setup.
+        """
+        num_firms = self.config['N_F']
+        num_households = self.config['N_H']
+        num_banks = self.config.get('N_B', 0)
+        total_agents = num_firms + num_households + num_banks
+
+        min_dist = 5 * (C.AGENT_RADIUS + C.AGENT_OUTLINE_WIDTH)
+        min_dist_sq = min_dist ** 2
+        
+        generated_positions = []
+        for _ in range(total_agents):
+            while True:
+                min_x = C.INVENTORY_GRAPH_X + C.GRAPH_WIDTH + C.SCREEN_PADDING
+                x = np.random.randint(min_x, C.SCREEN_WIDTH - C.SCREEN_PADDING)
+                y = np.random.randint(C.SCREEN_PADDING, C.SCREEN_HEIGHT - C.SCREEN_PADDING)
+                candidate_pos = (x, y)
+                is_valid = all(
+                    ((pos[0] - candidate_pos[0])**2 + (pos[1] - candidate_pos[1])**2) >= min_dist_sq
+                    for pos in generated_positions
+                )
+                if is_valid:
+                    generated_positions.append(candidate_pos)
+                    break
+        
+        random.shuffle(generated_positions)
+
+        self.firm_positions = {i: generated_positions.pop() for i in range(num_firms)}
+        self.household_positions = {i: generated_positions.pop() for i in range(num_households)}
+        self.bank_positions = {i: generated_positions.pop() for i in range(num_banks)}
+
+        # Also create the NumPy array versions for vectorized calculations
+        self.firm_pos_array = np.array(list(self.firm_positions.values()))
+        self.household_pos_array = np.array(list(self.household_positions.values()))
+        self.bank_pos_array = np.array(list(self.bank_positions.values()))
 
     def _setup_world(self):
         """Initializes all agent data in structured NumPy arrays."""

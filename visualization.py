@@ -4,6 +4,8 @@ import pygame
 import pygame.gfxdraw
 import math
 import constants as C
+import logging
+import matplotlib.pyplot as plt
 
 #======================================
 # PARTICLE CLASS for Animation
@@ -127,3 +129,84 @@ def draw_graph(surface, graph_data, font, x, y, width, height, title):
         item_y = legend_start_y + (i * 15)
         pygame.draw.rect(surface, color, (legend_start_x, item_y, 10, 10))
         surface.blit(text_surface, (legend_start_x + 15, item_y - 2))
+
+def display_final_graphs(inventory_data, price_data, capital_data, employee_data, wage_data):
+    """
+    Displays the firm inventory, price, capital, employee, and wage history in a Matplotlib window.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Displaying final inventory, price, capital, employee, and wage graphs...")
+
+    to_mpl_color = lambda c: tuple(x / 255.0 for x in c)
+    plt.style.use('dark_background')
+    fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 18), sharex=True)
+
+    # Plot 1: Inventory
+    for i, (firm_id, history) in enumerate(inventory_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax1.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+    ax1.set_title("Firm Inventory Over Time", fontsize=14)
+    ax1.set_ylabel("Inventory", fontsize=10)
+    ax1.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax1.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax1.legend()
+
+    # Plot 2: Price
+    for i, (firm_id, history) in enumerate(price_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax2.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+    ax2.set_title("Firm Price Over Time", fontsize=14)
+    ax2.set_xlabel("Tick", fontsize=10)
+    ax2.set_ylabel("Price", fontsize=10)
+    ax2.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax2.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax2.legend()
+
+    # Plot 3: Capital
+    for i, (firm_id, history) in enumerate(capital_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax3.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+    ax3.set_title("Firm Capital Over Time", fontsize=14)
+    ax3.set_xlabel("Tick", fontsize=10)
+    ax3.set_ylabel("Capital", fontsize=10)
+    ax3.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax3.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax3.legend()
+
+    # Plot 4: Employees
+    for i, (firm_id, history) in enumerate(employee_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax4.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH, drawstyle='steps-post')
+    ax4.set_title("Firm Employees Over Time", fontsize=14)
+    ax4.set_xlabel("Tick", fontsize=10)
+    ax4.set_ylabel("Employees", fontsize=10)
+    ax4.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax4.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax4.legend()
+
+    # Plot 5: Wages
+    for i, (firm_id, history) in enumerate(wage_data.items()):
+        color = to_mpl_color(C.GRAPH_LINE_COLORS[i % len(C.GRAPH_LINE_COLORS)])
+        ax5.plot(list(history), label=f"Firm {firm_id}", color=color, linewidth=C.GRAPH_LINE_WIDTH)
+    ax5.set_title("Firm Wage Rate Over Time", fontsize=14)
+    ax5.set_xlabel("Tick", fontsize=10)
+    ax5.set_ylabel("Wage Rate", fontsize=10)
+    ax5.set_facecolor(to_mpl_color(C.GRAPH_BG_COLOR))
+    ax5.grid(True, color=to_mpl_color(C.COLOR_GRID), linestyle='--', linewidth=0.5)
+    ax5.legend()
+
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
+        axis_color = to_mpl_color(C.GRAPH_AXIS_COLOR)
+        tick_color = to_mpl_color(C.GRAPH_FONT_COLOR)
+        ax.spines['top'].set_color(axis_color)
+        ax.spines['bottom'].set_color(axis_color)
+        ax.spines['left'].set_color(axis_color)
+        ax.spines['right'].set_color(axis_color)
+        ax.tick_params(axis='x', colors=tick_color)
+        ax.tick_params(axis='y', colors=tick_color)
+
+    fig.tight_layout()
+    try:
+        plt.show()
+    except Exception as e:
+        logger.error("Failed to display Matplotlib graph.", exc_info=True)
