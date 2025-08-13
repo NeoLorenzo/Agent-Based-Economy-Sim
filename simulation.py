@@ -378,10 +378,29 @@ class Simulation:
             )
 
     def _banking_phase(self):
-        """Firms may take loans from the bank if their capital is low."""
+        """Firms service their debt and may take loans from the bank."""
         if self.config.get('N_B', 0) == 0: return
         
         logger.debug("Start Banking Phase")
+
+        # --- Debt Servicing ---
+        firms_with_debt = np.where(self.firms['debt'] > 0)[0]
+        if len(firms_with_debt) > 0:
+            interest_payment = self.firms['debt'] * self.config['interest_rate']
+            principal_payment = self.firms['debt'] * self.config['loan_repayment_rate']
+            total_payment = interest_payment + principal_payment
+
+            # Deduct payments from firms with debt
+            self.firms['balance'][firms_with_debt] -= total_payment[firms_with_debt]
+            self.firms['debt'][firms_with_debt] -= principal_payment[firms_with_debt]
+            
+            for firm_id in firms_with_debt:
+                logger.info(
+                    "Firm %d paid $%.2f interest and $%.2f principal. Remaining debt: $%.2f",
+                    firm_id, interest_payment[firm_id], principal_payment[firm_id], self.firms['debt'][firm_id]
+                )
+
+        # --- Loan Issuance ---
         lookahead = self.config['loan_trigger_lookahead_ticks']
         future_expenses = (self.firms['num_workers'] * self.firms['wage_rate']) * lookahead
         needs_loan = np.where((self.firms['balance'] < future_expenses) & (self.firms['balance'] > 0))[0]

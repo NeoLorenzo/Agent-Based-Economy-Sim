@@ -2,6 +2,8 @@
   "N_H": 200,
   "N_F": 2,
   "N_B": 1,
+  "interest_rate": 0.001,
+  "loan_repayment_rate": 0.01,
   "loan_trigger_lookahead_ticks": 10,
   "loan_amount_multiplier": 2.0,
   "wage_rate": 5.0,
