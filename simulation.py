@@ -84,7 +84,6 @@ class Simulation:
             ('debt', 'f8'),
             ('price', 'f8'),
             ('wage_rate', 'f8'),
-            ('production_per_tick', 'i4'),
             ('inventory', 'i4'),
             ('target_inventory', 'i4'),
             ('revenue_this_tick', 'f8'),
@@ -98,8 +97,8 @@ class Simulation:
         self.firms['balance'] = self.config['firm_initial_capital']
         self.firms['price'] = self.config['p']
         self.firms['wage_rate'] = self.config['wage_rate']
-        self.firms['production_per_tick'] = self.config['firm_production_per_tick']
-        self.firms['target_inventory'] = self.firms['production_per_tick'] * self.config['target_inventory_level_factor']
+        # Target inventory is now calculated dynamically each tick based on production.
+        # It starts at 0.
         logger.info(
             "Injected initial capital of %.2f into each of the %d firms.",
             self.config['firm_initial_capital'], self.config['N_F']
@@ -205,7 +204,7 @@ class Simulation:
             'total_wages_paid': 0.0, 'unemployment_rate': 0.0
         }
 
-        self._wholesale_restocking_phase(summary)
+        self._production_phase(summary)
         self._shopping_phase(transactions, summary)
         total_payout = self._payday_phase(transactions, summary)
         self._labor_market_phase(total_payout, summary)
@@ -214,23 +213,37 @@ class Simulation:
 
         return transactions, summary
 
-    def _wholesale_restocking_phase(self, summary):
-        """Firms order new inventory from a wholesale market."""
-        logger.debug("Start Wholesale Restocking Phase")
-        wholesale_price = self.config['wholesale_price']
+    def _production_phase(self, summary):
+        """Firms produce new goods based on their workforce."""
+        logger.debug("Start Production Phase")
         
-        needed_quantity = self.firms['target_inventory'] - self.firms['inventory']
-        needed_quantity[needed_quantity < 0] = 0
+        # Production is a function of the number of workers
+        production_per_worker = self.config['production_per_worker']
+        produced_quantity = self.firms['num_workers'] * production_per_worker
         
-        affordable_quantity = (self.firms['balance'] / wholesale_price).astype(int)
-        ordered_quantity = np.minimum(needed_quantity, affordable_quantity)
+        # Production has a cost (raw materials)
+        material_cost_per_unit = self.config['raw_material_cost_per_unit']
+        production_cost = produced_quantity * material_cost_per_unit
         
-        order_cost = ordered_quantity * wholesale_price
-        self.firms['balance'] -= order_cost
-        self.firms['inventory'] += ordered_quantity
+        # Firms can only produce if they can afford the raw materials
+        can_afford_mask = self.firms['balance'] >= production_cost
         
-        summary['total_restock_units'] = np.sum(ordered_quantity)
-        summary['total_restock_cost'] = np.sum(order_cost)
+        # Update state for firms that can afford to produce
+        self.firms['balance'][can_afford_mask] -= production_cost[can_afford_mask]
+        self.firms['inventory'][can_afford_mask] += produced_quantity[can_afford_mask]
+        
+        total_produced = np.sum(produced_quantity[can_afford_mask])
+        total_cost = np.sum(production_cost[can_afford_mask])
+        
+        if total_produced > 0:
+            logger.info(
+                "Total production this tick: %d units at a total raw material cost of $%.2f.",
+                total_produced, total_cost
+            )
+        
+        # Update summary (renaming fields for clarity)
+        summary['total_production_units'] = total_produced
+        summary['total_production_cost'] = total_cost
 
     def _shopping_phase(self, transactions, summary):
         """Households choose firms and purchase goods."""
@@ -353,10 +366,20 @@ class Simulation:
     def _firm_adjustment_phase(self, summary):
         """Firms adjust prices based on inventory and wages based on unemployment."""
         logger.debug("Start Firm Adjustment Phase")
+
+        # Dynamic Target Inventory Calculation
+        # A firm's target inventory is to hold a buffer equivalent to a certain number of ticks of its own production.
+        prod_rate = self.firms['num_workers'] * self.config['production_per_worker']
+        ticks_of_prod_to_hold = self.config['target_inventory_production_ticks_factor']
+        self.firms['target_inventory'] = prod_rate * ticks_of_prod_to_hold
+        logger.debug(
+            "Firms updated target inventories. Example Firm 0: Target=%d (based on %d workers)",
+            self.firms['target_inventory'][0], self.firms['num_workers'][0]
+        )
         
         # Price Adjustments
-        upper_thresh = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
-        lower_thresh = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
+        upper_thresh = self.firms['target_inventory'] * self.config['inventory_upper_threshold_factor']
+        lower_thresh = self.firms['target_inventory'] * self.config['inventory_lower_threshold_factor']
         old_prices = self.firms['price'].copy()
         adj_rate = self.config['price_adjustment_rate']
         self.firms['price'][self.firms['inventory'] < lower_thresh] *= (1 + adj_rate)
