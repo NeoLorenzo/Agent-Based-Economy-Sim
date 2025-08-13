@@ -89,7 +89,8 @@ class Simulation:
             ('target_inventory', 'i4'),
             ('revenue_this_tick', 'f8'),
             ('num_workers', 'i4'),
-            ('target_num_workers', 'i4')
+            ('target_num_workers', 'i4'),
+            ('failed_to_hire_last_tick', '?') # Boolean flag
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
@@ -311,18 +312,41 @@ class Simulation:
                 logger.info("Firm %d laid off %d worker(s) due to low capital.", firm_id, len(layoff_candidate_idx))
 
         # Hiring Logic
+        self.firms['failed_to_hire_last_tick'][:] = False
         unemployed_hh_indices = np.where(self.households['employer_id'] == -1)[0]
+        
         if len(unemployed_hh_indices) > 0:
             hiring_revenue_threshold = total_payout * self.config['firm_hiring_revenue_threshold_factor']
-            firms_that_should_hire = np.where((self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers']))[0]
-            np.random.shuffle(firms_that_should_hire)
-            for firm_id in firms_that_should_hire:
-                if len(unemployed_hh_indices) == 0: break
-                worker_to_hire_idx = np.random.choice(unemployed_hh_indices)
-                self.households['employer_id'][worker_to_hire_idx] = firm_id
-                self.firms['num_workers'][firm_id] += 1
-                logger.info("Firm %d hired 1 new worker.", firm_id)
-                unemployed_hh_indices = np.setdiff1d(unemployed_hh_indices, [worker_to_hire_idx])
+            hiring_firms_mask = (self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers'])
+            hiring_firm_ids = np.where(hiring_firms_mask)[0]
+
+            if len(hiring_firm_ids) > 0:
+                # Identify firms that want to hire but haven't yet. Assume they will fail.
+                self.firms['failed_to_hire_last_tick'][hiring_firm_ids] = True
+                
+                # Create a list of open positions with their wages
+                open_positions = []
+                for firm_id in hiring_firm_ids:
+                    num_openings = self.firms['target_num_workers'][firm_id] - self.firms['num_workers'][firm_id]
+                    wage = self.firms['wage_rate'][firm_id]
+                    for _ in range(num_openings):
+                        open_positions.append({'firm_id': firm_id, 'wage': wage})
+                
+                # Sort positions by wage (highest first) and unemployed households randomly
+                open_positions.sort(key=lambda x: x['wage'], reverse=True)
+                np.random.shuffle(unemployed_hh_indices)
+                
+                # Match best jobs to available workers
+                num_to_hire = min(len(open_positions), len(unemployed_hh_indices))
+                for i in range(num_to_hire):
+                    job = open_positions[i]
+                    worker_id = unemployed_hh_indices[i]
+                    firm_id = job['firm_id']
+                    
+                    self.households['employer_id'][worker_id] = firm_id
+                    self.firms['num_workers'][firm_id] += 1
+                    self.firms['failed_to_hire_last_tick'][firm_id] = False # Success!
+                    logger.info("Firm %d hired 1 new worker (Wage: %.2f).", firm_id, job['wage'])
 
         summary['unemployment_rate'] = (np.count_nonzero(self.households['employer_id'] == -1) / self.config['N_H']) * 100
 
@@ -340,19 +364,18 @@ class Simulation:
         if len(np.where(old_prices != self.firms['price'])[0]) > 0:
             logger.info("%d firms adjusted their prices this tick.", len(np.where(old_prices != self.firms['price'])[0]))
 
-        # Wage Adjustments
-        tick_interval = self.config.get('wage_adjustment_tick_interval', 20)
-        if self.config.get('enable_dynamic_wages', False) and (self._current_tick % tick_interval == 0):
-            target_unemployment = self.config['target_unemployment_rate']
-            current_unemployment = summary['unemployment_rate'] / 100.0
-            sensitivity = self.config['wage_adjustment_sensitivity']
-            adjustment_factor = (target_unemployment - current_unemployment) * sensitivity
-            old_wages = self.firms['wage_rate'].copy()
-            self.firms['wage_rate'] *= (1 + adjustment_factor)
-            min_wage = self.config['wholesale_price'] * self.config['food_per_person']
-            self.firms['wage_rate'][self.firms['wage_rate'] < min_wage] = min_wage
-            if np.any(self.firms['wage_rate'] != old_wages):
-                logger.info("Adjusting wages based on unemployment rate of %.1f%%.", summary['unemployment_rate'])
+        # Competitive Wage Adjustments
+        increase_rate = self.config.get('competitive_wage_increase_rate', 0.02)
+        firms_that_failed_to_hire = np.where(self.firms['failed_to_hire_last_tick'])[0]
+        
+        for firm_id in firms_that_failed_to_hire:
+            old_wage = self.firms['wage_rate'][firm_id]
+            new_wage = old_wage * (1 + increase_rate)
+            self.firms['wage_rate'][firm_id] = new_wage
+            logger.info(
+                "Firm %d failed to hire, increasing wage from %.2f to %.2f.",
+                firm_id, old_wage, new_wage
+            )
 
     def _banking_phase(self):
         """Firms may take loans from the bank if their capital is low."""
