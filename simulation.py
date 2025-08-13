@@ -394,10 +394,20 @@ class Simulation:
             self.firms['balance'][firms_with_debt] -= total_payment[firms_with_debt]
             self.firms['debt'][firms_with_debt] -= principal_payment[firms_with_debt]
             
+            # Transfer collected payments to the bank
+            total_collected = np.sum(total_payment[firms_with_debt])
+            self.banks['balance'][0] += total_collected
+            
             for firm_id in firms_with_debt:
                 logger.info(
                     "Firm %d paid $%.2f interest and $%.2f principal. Remaining debt: $%.2f",
                     firm_id, interest_payment[firm_id], principal_payment[firm_id], self.firms['debt'][firm_id]
+                )
+            
+            if total_collected > 0:
+                logger.info(
+                    "Bank collected a total of $%.2f in debt payments this tick. New balance: $%.2f",
+                    total_collected, self.banks['balance'][0]
                 )
 
         # --- Loan Issuance ---
