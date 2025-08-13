@@ -334,10 +334,8 @@ class Simulation:
             hiring_firm_ids = np.where(hiring_firms_mask)[0]
 
             if len(hiring_firm_ids) > 0:
-                # Identify firms that want to hire but haven't yet. Assume they will fail.
                 self.firms['failed_to_hire_last_tick'][hiring_firm_ids] = True
                 
-                # Create a list of open positions with their wages
                 open_positions = []
                 for firm_id in hiring_firm_ids:
                     num_openings = self.firms['target_num_workers'][firm_id] - self.firms['num_workers'][firm_id]
@@ -345,11 +343,9 @@ class Simulation:
                     for _ in range(num_openings):
                         open_positions.append({'firm_id': firm_id, 'wage': wage})
                 
-                # Sort positions by wage (highest first) and unemployed households randomly
                 open_positions.sort(key=lambda x: x['wage'], reverse=True)
                 np.random.shuffle(unemployed_hh_indices)
                 
-                # Match best jobs to available workers
                 num_to_hire = min(len(open_positions), len(unemployed_hh_indices))
                 for i in range(num_to_hire):
                     job = open_positions[i]
@@ -358,8 +354,42 @@ class Simulation:
                     
                     self.households['employer_id'][worker_id] = firm_id
                     self.firms['num_workers'][firm_id] += 1
-                    self.firms['failed_to_hire_last_tick'][firm_id] = False # Success!
+                    self.firms['failed_to_hire_last_tick'][firm_id] = False
                     logger.info("Firm %d hired 1 new worker (Wage: %.2f).", firm_id, job['wage'])
+
+        # Job Switching Logic for Employed Households
+        employed_mask = self.households['employer_id'] != -1
+        employed_indices = np.where(employed_mask)[0]
+        np.random.shuffle(employed_indices) # Randomize order to prevent bias
+        
+        job_switching_threshold = self.config.get('job_switching_wage_threshold', 1.01)
+
+        for hh_id in employed_indices:
+            current_employer_id = self.households['employer_id'][hh_id]
+            current_wage = self.firms['wage_rate'][current_employer_id]
+            
+            # Find the best alternative job offer
+            potential_employers = np.where(self.firms['wage_rate'] > current_wage * job_switching_threshold)[0]
+            
+            if len(potential_employers) > 0:
+                # Find the highest paying alternative employer
+                best_new_employer_id = potential_employers[np.argmax(self.firms['wage_rate'][potential_employers])]
+                
+                # Switch jobs
+                old_wage = self.firms['wage_rate'][current_employer_id]
+                new_wage = self.firms['wage_rate'][best_new_employer_id]
+
+                self.households['employer_id'][hh_id] = best_new_employer_id
+                self.firms['num_workers'][current_employer_id] -= 1
+                self.firms['num_workers'][best_new_employer_id] += 1
+                
+                # The firm that lost an employee is now under pressure to raise wages
+                self.firms['failed_to_hire_last_tick'][current_employer_id] = True
+                
+                logger.info(
+                    "Household %d switched employer from Firm %d to Firm %d for a higher wage (New: %.2f, Old: %.2f).",
+                    hh_id, current_employer_id, best_new_employer_id, new_wage, old_wage
+                )
 
         summary['unemployment_rate'] = (np.count_nonzero(self.households['employer_id'] == -1) / self.config['N_H']) * 100
 
@@ -389,15 +419,34 @@ class Simulation:
 
         # Competitive Wage Adjustments
         increase_rate = self.config.get('competitive_wage_increase_rate', 0.02)
-        firms_that_failed_to_hire = np.where(self.firms['failed_to_hire_last_tick'])[0]
-        
-        for firm_id in firms_that_failed_to_hire:
+
+        # Condition 1: Proactive wage increase by profitable firms
+        current_wage_bill = self.firms['num_workers'] * self.firms['wage_rate']
+        profitability_threshold = current_wage_bill * self.config['firm_hiring_revenue_threshold_factor']
+        profitable_firms = (self.firms['balance'] > profitability_threshold)
+
+        # Condition 2: Reactive wage increase from losing an employee
+        lost_employee_firms = self.firms['failed_to_hire_last_tick']
+
+        # Combine conditions: A firm will raise wages if it's profitable OR it lost an employee
+        firms_raising_wages = np.where(profitable_firms | lost_employee_firms)[0]
+
+        for firm_id in firms_raising_wages:
             old_wage = self.firms['wage_rate'][firm_id]
             new_wage = old_wage * (1 + increase_rate)
             self.firms['wage_rate'][firm_id] = new_wage
+            
+            # Log the reason for the wage increase
+            if profitable_firms[firm_id] and not lost_employee_firms[firm_id]:
+                reason = "is profitable, proactively"
+            elif lost_employee_firms[firm_id]:
+                reason = "lost an employee,"
+            else: # Should not happen but for completeness
+                reason = "is adjusting"
+
             logger.info(
-                "Firm %d failed to hire, increasing wage from %.2f to %.2f.",
-                firm_id, old_wage, new_wage
+                "Firm %d %s increasing wage from %.2f to %.2f.",
+                firm_id, reason, old_wage, new_wage
             )
 
     def _banking_phase(self):
