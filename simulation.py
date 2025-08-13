@@ -147,21 +147,29 @@ class Simulation:
 
     def run_one_tick(self, current_tick):
         """
-        Executes one full cycle of the simulation using vectorized operations.
+        Executes one full cycle of the simulation by calling phase-specific methods.
+        This method orchestrates the high-level flow of a single tick.
         Returns a list of transactions for visualization and a summary for logging.
         """
-        self._current_tick = current_tick # Store tick for internal logic
-        transactions_this_tick = []
-        tick_summary = {
-            'total_restock_cost': 0.0,
-            'total_restock_units': 0,
-            'total_sales_volume': 0.0,
-            'total_sales_units': 0,
-            'total_wages_paid': 0.0,
-            'unemployment_rate': 0.0
+        self._current_tick = current_tick
+        transactions = []
+        summary = {
+            'total_restock_cost': 0.0, 'total_restock_units': 0,
+            'total_sales_volume': 0.0, 'total_sales_units': 0,
+            'total_wages_paid': 0.0, 'unemployment_rate': 0.0
         }
 
-        # 1. Wholesale Restocking Phase (Vectorized)
+        self._wholesale_restocking_phase(summary)
+        self._shopping_phase(transactions, summary)
+        total_payout = self._payday_phase(transactions, summary)
+        self._labor_market_phase(total_payout, summary)
+        self._firm_adjustment_phase(summary)
+        self._banking_phase()
+
+        return transactions, summary
+
+    def _wholesale_restocking_phase(self, summary):
+        """Firms order new inventory from a wholesale market."""
         logger.debug("Start Wholesale Restocking Phase")
         wholesale_price = self.config['wholesale_price']
         
@@ -169,264 +177,151 @@ class Simulation:
         needed_quantity[needed_quantity < 0] = 0
         
         affordable_quantity = (self.firms['balance'] / wholesale_price).astype(int)
-        
         ordered_quantity = np.minimum(needed_quantity, affordable_quantity)
         
         order_cost = ordered_quantity * wholesale_price
         self.firms['balance'] -= order_cost
         self.firms['inventory'] += ordered_quantity
         
-        # Aggregate restocking data for the summary
-        tick_summary['total_restock_units'] = np.sum(ordered_quantity)
-        tick_summary['total_restock_cost'] = np.sum(order_cost)
+        summary['total_restock_units'] = np.sum(ordered_quantity)
+        summary['total_restock_cost'] = np.sum(order_cost)
 
-        # 2. Shopping Phase
+    def _shopping_phase(self, transactions, summary):
+        """Households choose firms and purchase goods."""
         logger.debug("Start Shopping Phase")
         
-        # --- Determine which firm each household will shop at (Vectorized) ---
         if self.config.get('enable_proximity_choice', False):
-            # Households consider a few of the closest firms, then choose the cheapest among them.
-            # This models realistic shopping behavior where consumers balance convenience and price.
-            
-            # 1. Calculate squared distances from every household to every firm.
             diffs = self.household_pos_array[:, np.newaxis, :] - self.firm_pos_array[np.newaxis, :, :]
-            dist_sq = np.sum(diffs**2, axis=2) # Shape: (N_H, N_F)
-            
-            # 2. Get the indices of the N closest firms for each household.
-            # `np.argsort` gives us the indices that would sort the array.
+            dist_sq = np.sum(diffs**2, axis=2)
             closest_firm_indices = np.argsort(dist_sq, axis=1)
-            
-            # 3. Limit the choice to the N closest firms specified in the config.
             n_to_consider = self.config.get('shopping_firms_to_consider', 1)
-            candidate_indices = closest_firm_indices[:, :n_to_consider] # Shape: (N_H, n_to_consider)
-            
-            # 4. Get the prices of these candidate firms.
-            candidate_prices = self.firms['price'][candidate_indices] # Shape: (N_H, n_to_consider)
-            
-            # 5. Find the index of the minimum price *within the candidates*.
-            # This gives us an index from 0 to n_to_consider-1 for each household.
-            cheapest_candidate_idx = np.argmin(candidate_prices, axis=1) # Shape: (N_H,)
-            
-            # 6. Use the index from step 5 to select the final firm ID from our candidate list.
-            # This is the core of the advanced indexing to get the final result.
+            candidate_indices = closest_firm_indices[:, :n_to_consider]
+            candidate_prices = self.firms['price'][candidate_indices]
+            cheapest_candidate_idx = np.argmin(candidate_prices, axis=1)
             chosen_firm_ids = candidate_indices[np.arange(self.config['N_H']), cheapest_candidate_idx]
-
         else:
-            # Fallback to simple random choice if proximity is disabled.
             firm_ids_list = list(range(self.config['N_F']))
             chosen_firm_ids = np.array([random.choice(firm_ids_list) for _ in range(self.config['N_H'])])
         
-        # --- Calculate purchase requests for all households (Vectorized) ---
         requested_qty = self.households['size'] * self.config['food_per_person']
         firm_prices = self.firms['price'][chosen_firm_ids]
         max_affordable_qty = (self.households['balance'] / firm_prices).astype(int)
         purchase_request_qty = np.minimum(requested_qty, max_affordable_qty)
 
-        # --- Process sales iteratively (to handle inventory correctly) ---
-        # This loop is kept to prevent race conditions where multiple households
-        # buy from the same firm's inventory simultaneously in a vectorized op.
         for hh_id in range(self.config['N_H']):
             firm_id = chosen_firm_ids[hh_id]
             request = purchase_request_qty[hh_id]
+            if request > 0 and self.firms['inventory'][firm_id] > 0:
+                sold_quantity = min(request, self.firms['inventory'][firm_id])
+                amount = sold_quantity * self.firms['price'][firm_id]
+                
+                self.households['balance'][hh_id] -= amount
+                self.firms['inventory'][firm_id] -= sold_quantity
+                self.firms['revenue_this_tick'][firm_id] += amount
+                
+                summary['total_sales_units'] += sold_quantity
+                summary['total_sales_volume'] += amount
+                transactions.append({'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount})
 
-            if request <= 0:
-                continue
-
-            firm_inventory = self.firms['inventory'][firm_id]
-            if firm_inventory <= 0:
-                continue
-
-            sold_quantity = min(request, firm_inventory)
-            
-            # Update inventory and balances
-            amount = sold_quantity * self.firms['price'][firm_id]
-            self.households['balance'][hh_id] -= amount
-            self.firms['inventory'][firm_id] -= sold_quantity
-            self.firms['revenue_this_tick'][firm_id] += amount
-            
-            # Aggregate sales data
-            tick_summary['total_sales_units'] += sold_quantity
-            tick_summary['total_sales_volume'] += amount
-
-            transactions_this_tick.append({
-                'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount
-            })
-
-        # 3. Payday Phase (Vectorized)
+    def _payday_phase(self, transactions, summary):
+        """Firms pay wages to their employees."""
         logger.debug("Start Payday Phase")
         
-        # Bank revenue before paying wages
         self.firms['balance'] += self.firms['revenue_this_tick']
-        
-        # Calculate total wage payout per firm based on a fixed wage per employee
         total_payout = self.firms['num_workers'] * self.firms['wage_rate']
         
-        # Firms pay wages from their balance
         self.firms['balance'] -= total_payout
-        self.firms['revenue_this_tick'][:] = 0 # Reset for next tick
+        self.firms['revenue_this_tick'][:] = 0
         
-        # Calculate wage per worker for each firm, handling firms with no workers
         num_workers = self.firms['num_workers']
         wage_per_worker = np.divide(total_payout, num_workers, out=np.zeros_like(total_payout), where=num_workers!=0)
         
-        # Distribute wages only to employed households
         employed_mask = self.households['employer_id'] != -1
         employer_ids = self.households['employer_id'][employed_mask]
-        payouts_to_households = wage_per_worker[employer_ids]
-        self.households['balance'][employed_mask] += payouts_to_households
+        self.households['balance'][employed_mask] += wage_per_worker[employer_ids]
         
-        # Create wage transaction logs
         for firm_id, payout in enumerate(total_payout):
             if payout > 0:
-                # Find all workers for this firm
                 worker_ids = np.where(self.households['employer_id'] == firm_id)[0]
                 individual_wage = wage_per_worker[firm_id]
                 for worker_id in worker_ids:
-                    transactions_this_tick.append({
-                        'type': 'wage', 'from_id': firm_id, 'to_id': int(worker_id), 'amount': individual_wage
-                    })
+                    transactions.append({'type': 'wage', 'from_id': firm_id, 'to_id': int(worker_id), 'amount': individual_wage})
         
-        # Aggregate wage data
-        tick_summary['total_wages_paid'] = np.sum(total_payout)
+        summary['total_wages_paid'] = np.sum(total_payout)
+        return total_payout
 
-        # 4. Labor Market Phase (Hiring and Firing)
+    def _labor_market_phase(self, total_payout, summary):
+        """Firms hire and fire workers based on economic conditions."""
         logger.debug("Start Labor Market Phase")
 
-        # --- Firing Logic ---
-        # Firms lay off workers if their capital is too low to support the wage bill from last tick.
+        # Firing Logic
         layoff_threshold = total_payout * self.config['firm_layoff_capital_threshold_factor']
         firms_that_should_fire = np.where((self.firms['balance'] < layoff_threshold) & (self.firms['num_workers'] > 0))[0]
-
         for firm_id in firms_that_should_fire:
-            workers_to_fire = 1 # Fire one worker at a time for stability
-            
-            # Find employees of this firm
             employee_indices = np.where(self.households['employer_id'] == firm_id)[0]
-            
             if len(employee_indices) > 0:
-                # Choose a random worker to lay off
-                layoff_candidate_idx = np.random.choice(employee_indices, size=min(workers_to_fire, len(employee_indices)), replace=False)
-                
-                # Set them to unemployed
+                layoff_candidate_idx = np.random.choice(employee_indices, size=min(1, len(employee_indices)), replace=False)
                 self.households['employer_id'][layoff_candidate_idx] = -1
-                
-                num_fired = len(layoff_candidate_idx)
-                self.firms['num_workers'][firm_id] -= num_fired
-                logger.info("Firm %d laid off %d worker(s) due to low capital.", firm_id, num_fired)
+                self.firms['num_workers'][firm_id] -= len(layoff_candidate_idx)
+                logger.info("Firm %d laid off %d worker(s) due to low capital.", firm_id, len(layoff_candidate_idx))
 
-        # --- Hiring Logic ---
-        # Firms hire if they have high revenue and are below their target workforce
+        # Hiring Logic
         unemployed_hh_indices = np.where(self.households['employer_id'] == -1)[0]
-        
         if len(unemployed_hh_indices) > 0:
-            # Firms hire if their last revenue was high and they have capacity
             hiring_revenue_threshold = total_payout * self.config['firm_hiring_revenue_threshold_factor']
             firms_that_should_hire = np.where((self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers']))[0]
-
-            # Shuffle to give firms a random chance to hire first
             np.random.shuffle(firms_that_should_hire)
-
             for firm_id in firms_that_should_hire:
-                # Stop if there are no more unemployed people to hire
-                if len(unemployed_hh_indices) == 0:
-                    break
-                
-                # Hire one worker
+                if len(unemployed_hh_indices) == 0: break
                 worker_to_hire_idx = np.random.choice(unemployed_hh_indices)
-                
                 self.households['employer_id'][worker_to_hire_idx] = firm_id
                 self.firms['num_workers'][firm_id] += 1
                 logger.info("Firm %d hired 1 new worker.", firm_id)
-                
-                # Remove the hired person from the pool of unemployed
                 unemployed_hh_indices = np.setdiff1d(unemployed_hh_indices, [worker_to_hire_idx])
 
-        # Update unemployment rate for summary
-        num_unemployed = np.count_nonzero(self.households['employer_id'] == -1)
-        tick_summary['unemployment_rate'] = (num_unemployed / self.config['N_H']) * 100
+        summary['unemployment_rate'] = (np.count_nonzero(self.households['employer_id'] == -1) / self.config['N_H']) * 100
 
-        # 5. Firm Adjustment Phase (Prices and Wages)
+    def _firm_adjustment_phase(self, summary):
+        """Firms adjust prices based on inventory and wages based on unemployment."""
         logger.debug("Start Firm Adjustment Phase")
         
-        # --- Price Adjustments ---
-        upper_threshold = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
-        lower_threshold = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
-        
-        should_raise_price = self.firms['inventory'] < lower_threshold
-        should_lower_price = self.firms['inventory'] > upper_threshold
-        
+        # Price Adjustments
+        upper_thresh = self.firms['production_per_tick'] * self.config['inventory_upper_threshold_factor']
+        lower_thresh = self.firms['production_per_tick'] * self.config['inventory_lower_threshold_factor']
         old_prices = self.firms['price'].copy()
-        
         adj_rate = self.config['price_adjustment_rate']
-        self.firms['price'][should_raise_price] *= (1 + adj_rate)
-        self.firms['price'][should_lower_price] *= (1 - adj_rate)
-        
-        price_changes = np.where(old_prices != self.firms['price'])[0]
-        if len(price_changes) > 0:
-            logger.info("%d firms adjusted their prices this tick.", len(price_changes))
+        self.firms['price'][self.firms['inventory'] < lower_thresh] *= (1 + adj_rate)
+        self.firms['price'][self.firms['inventory'] > upper_thresh] *= (1 - adj_rate)
+        if len(np.where(old_prices != self.firms['price'])[0]) > 0:
+            logger.info("%d firms adjusted their prices this tick.", len(np.where(old_prices != self.firms['price'])[0]))
 
-        # --- Wage Adjustments (New) ---
-        # This logic runs on a throttled interval to prevent chaotic oscillations.
+        # Wage Adjustments
         tick_interval = self.config.get('wage_adjustment_tick_interval', 20)
         if self.config.get('enable_dynamic_wages', False) and (self._current_tick % tick_interval == 0):
             target_unemployment = self.config['target_unemployment_rate']
-            current_unemployment = tick_summary['unemployment_rate'] / 100.0
+            current_unemployment = summary['unemployment_rate'] / 100.0
             sensitivity = self.config['wage_adjustment_sensitivity']
-            
-            # The core adjustment formula: if unemployment is below target, wages rise, and vice-versa.
             adjustment_factor = (target_unemployment - current_unemployment) * sensitivity
-            
             old_wages = self.firms['wage_rate'].copy()
             self.firms['wage_rate'] *= (1 + adjustment_factor)
-            
-            # Prevent wages from falling below a minimum subsistence level (e.g., wholesale price of one food unit)
             min_wage = self.config['wholesale_price'] * self.config['food_per_person']
             self.firms['wage_rate'][self.firms['wage_rate'] < min_wage] = min_wage
-            
-            num_increased = np.count_nonzero(self.firms['wage_rate'] > old_wages)
-            num_decreased = np.count_nonzero(self.firms['wage_rate'] < old_wages)
-            
-            if num_increased > 0 or num_decreased > 0:
-                logger.info(
-                    "Unemployment is %.1f%%. Adjusting wages (Target: %.1f%%, Sensitivity: %.1f). %d firms increased wages, %d firms decreased.",
-                    current_unemployment * 100,
-                    target_unemployment * 100,
-                    sensitivity,
-                    num_increased,
-                    num_decreased
-                )
+            if np.any(self.firms['wage_rate'] != old_wages):
+                logger.info("Adjusting wages based on unemployment rate of %.1f%%.", summary['unemployment_rate'])
 
-        # 6. Banking Phase (Loans)
-        # Firms check if they need a loan to survive the near future.
-        if self.config.get('N_B', 0) > 0:
-            logger.debug("Start Banking Phase")
-            
-            # Estimate expenses for the next N ticks (currently just wages)
-            lookahead_ticks = self.config['loan_trigger_lookahead_ticks']
-            estimated_future_expenses = (self.firms['num_workers'] * self.firms['wage_rate']) * lookahead_ticks
-            
-            # Identify firms whose balance is less than their estimated future expenses
-            firms_needing_loan_mask = (self.firms['balance'] < estimated_future_expenses) & (self.firms['balance'] > 0)
-            firms_needing_loan_indices = np.where(firms_needing_loan_mask)[0]
+    def _banking_phase(self):
+        """Firms may take loans from the bank if their capital is low."""
+        if self.config.get('N_B', 0) == 0: return
+        
+        logger.debug("Start Banking Phase")
+        lookahead = self.config['loan_trigger_lookahead_ticks']
+        future_expenses = (self.firms['num_workers'] * self.firms['wage_rate']) * lookahead
+        needs_loan = np.where((self.firms['balance'] < future_expenses) & (self.firms['balance'] > 0))[0]
 
-            if len(firms_needing_loan_indices) > 0:
-                loan_multiplier = self.config['loan_amount_multiplier']
-                
-                for firm_id in firms_needing_loan_indices:
-                    # Loan is double the projected expenses
-                    loan_amount = estimated_future_expenses[firm_id] * loan_multiplier
-                    
-                    # Update firm balance and debt
-                    self.firms['balance'][firm_id] += loan_amount
-                    self.firms['debt'][firm_id] += loan_amount
-                    
-                    # For now, the bank's balance is effectively infinite, so we don't decrement it.
-                    
-                    logger.info(
-                        "Firm %d took a loan of %.2f. New total debt is %.2f.",
-                        firm_id,
-                        loan_amount,
-                        self.firms['debt'][firm_id]
-                    )
-
-        return transactions_this_tick, tick_summary
+        if len(needs_loan) > 0:
+            multiplier = self.config['loan_amount_multiplier']
+            for firm_id in needs_loan:
+                loan_amount = future_expenses[firm_id] * multiplier
+                self.firms['balance'][firm_id] += loan_amount
+                self.firms['debt'][firm_id] += loan_amount
+                logger.info("Firm %d took a loan of %.2f. New total debt is %.2f.", firm_id, loan_amount, self.firms['debt'][firm_id])
