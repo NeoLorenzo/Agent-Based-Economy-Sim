@@ -87,9 +87,17 @@ class Simulation:
             ('inventory', 'i4'),
             ('target_inventory', 'i4'),
             ('revenue_this_tick', 'f8'),
+            ('units_sold_last_tick', 'i4'),
+            ('production_cost_last_tick', 'f8'),
+            ('wages_paid_last_tick', 'f8'),
+            ('profit_last_tick', 'f8'),
+            ('previous_profit', 'f8'),
+            ('ticks_of_falling_profit', 'i4'),
+            ('last_price_direction', 'i4'),
             ('num_workers', 'i4'),
             ('target_num_workers', 'i4'),
-            ('failed_to_hire_last_tick', '?') # Boolean flag
+            ('failed_to_hire_last_tick', '?'), # Boolean flag
+            ('is_bankrupt', '?') # Boolean flag
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
@@ -97,6 +105,7 @@ class Simulation:
         self.firms['balance'] = self.config['firm_initial_capital']
         self.firms['price'] = self.config['p']
         self.firms['wage_rate'] = self.config['wage_rate']
+        self.firms['last_price_direction'] = 1 # Default to trying to increase price
         # Target inventory is now calculated dynamically each tick based on production.
         # It starts at 0.
         logger.info(
@@ -217,6 +226,9 @@ class Simulation:
         """Firms produce new goods based on their workforce."""
         logger.debug("Start Production Phase")
         
+        # Reset costs for this tick
+        self.firms['production_cost_last_tick'][:] = 0
+
         # Production is a function of the number of workers
         production_per_worker = self.config['production_per_worker']
         produced_quantity = self.firms['num_workers'] * production_per_worker
@@ -230,10 +242,19 @@ class Simulation:
         
         # Update state for firms that can afford to produce
         self.firms['balance'][can_afford_mask] -= production_cost[can_afford_mask]
+        self.firms['production_cost_last_tick'][can_afford_mask] = production_cost[can_afford_mask]
         self.firms['inventory'][can_afford_mask] += produced_quantity[can_afford_mask]
         
         total_produced = np.sum(produced_quantity[can_afford_mask])
         total_cost = np.sum(production_cost[can_afford_mask])
+
+        # --- PATCH THE MONEY LEAK ---
+        # Re-inject the money spent on raw materials back into the economy as household income.
+        # This represents households owning all primary resources.
+        if total_cost > 0:
+            income_per_household = total_cost / self.config['N_H']
+            self.households['balance'] += income_per_household
+            logger.info("Distributed $%.2f in raw material costs as income to households.", total_cost)
         
         if total_produced > 0:
             logger.info(
@@ -249,18 +270,31 @@ class Simulation:
         """Households choose firms and purchase goods."""
         logger.debug("Start Shopping Phase")
         
+        # Reset sales counter for this tick
+        self.firms['units_sold_last_tick'][:] = 0
+
+        active_firm_ids = np.where(~self.firms['is_bankrupt'])[0]
+        if len(active_firm_ids) == 0:
+            logger.warning("All firms are bankrupt. No shopping can occur.")
+            return
+
+        active_firm_pos = self.firm_pos_array[active_firm_ids]
+        active_firm_prices = self.firms['price'][active_firm_ids]
+        
         if self.config.get('enable_proximity_choice', False):
-            diffs = self.household_pos_array[:, np.newaxis, :] - self.firm_pos_array[np.newaxis, :, :]
+            diffs = self.household_pos_array[:, np.newaxis, :] - active_firm_pos[np.newaxis, :, :]
             dist_sq = np.sum(diffs**2, axis=2)
-            closest_firm_indices = np.argsort(dist_sq, axis=1)
-            n_to_consider = self.config.get('shopping_firms_to_consider', 1)
-            candidate_indices = closest_firm_indices[:, :n_to_consider]
-            candidate_prices = self.firms['price'][candidate_indices]
-            cheapest_candidate_idx = np.argmin(candidate_prices, axis=1)
-            chosen_firm_ids = candidate_indices[np.arange(self.config['N_H']), cheapest_candidate_idx]
+            
+            n_to_consider = min(self.config.get('shopping_firms_to_consider', 1), len(active_firm_ids))
+            
+            closest_local_indices = np.argsort(dist_sq, axis=1)[:, :n_to_consider]
+            candidate_prices = active_firm_prices[closest_local_indices]
+            
+            cheapest_candidate_local_idx = np.argmin(candidate_prices, axis=1)
+            chosen_firm_local_indices = closest_local_indices[np.arange(self.config['N_H']), cheapest_candidate_local_idx]
+            chosen_firm_ids = active_firm_ids[chosen_firm_local_indices]
         else:
-            firm_ids_list = list(range(self.config['N_F']))
-            chosen_firm_ids = np.array([random.choice(firm_ids_list) for _ in range(self.config['N_H'])])
+            chosen_firm_ids = np.random.choice(active_firm_ids, size=self.config['N_H'])
         
         requested_qty = self.households['size'] * self.config['food_per_person']
         firm_prices = self.firms['price'][chosen_firm_ids]
@@ -277,20 +311,52 @@ class Simulation:
                 self.households['balance'][hh_id] -= amount
                 self.firms['inventory'][firm_id] -= sold_quantity
                 self.firms['revenue_this_tick'][firm_id] += amount
+                self.firms['units_sold_last_tick'][firm_id] += sold_quantity
                 
                 summary['total_sales_units'] += sold_quantity
                 summary['total_sales_volume'] += amount
                 transactions.append({'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount})
 
     def _payday_phase(self, transactions, summary):
-        """Firms pay wages to their employees."""
+        """Firms pay wages to their employees. Firms that cannot pay go bankrupt."""
         logger.debug("Start Payday Phase")
         
         self.firms['balance'] += self.firms['revenue_this_tick']
-        total_payout = self.firms['num_workers'] * self.firms['wage_rate']
-        
-        self.firms['balance'] -= total_payout
+        revenue_last_tick = self.firms['revenue_this_tick'].copy()
         self.firms['revenue_this_tick'][:] = 0
+        
+        total_payout = self.firms['num_workers'] * self.firms['wage_rate']
+        self.firms['wages_paid_last_tick'] = total_payout
+        
+        # --- Profit Calculation ---
+        # Profit = Revenue - (Production Costs + Wage Costs)
+        self.firms['profit_last_tick'] = revenue_last_tick - (self.firms['production_cost_last_tick'] + self.firms['wages_paid_last_tick'])
+
+        # --- Bankruptcy Check ---
+        active_mask = ~self.firms['is_bankrupt']
+        bankrupt_mask = (self.firms['balance'] < total_payout) & active_mask
+        
+        for firm_id in np.where(bankrupt_mask)[0]:
+            logger.warning(
+                "FIRM BANKRUPTCY: Firm %d is failing. Balance: %.2f, Payroll Due: %.2f, Debt: %.2f",
+                firm_id, self.firms['balance'][firm_id], total_payout[firm_id], self.firms['debt'][firm_id]
+            )
+            self.firms['is_bankrupt'][firm_id] = True
+            
+            # Fire all employees
+            employee_indices = np.where(self.households['employer_id'] == firm_id)[0]
+            self.households['employer_id'][employee_indices] = -1
+            
+            # Liquidate assets and reset state
+            self.firms['balance'][firm_id] = 0
+            self.firms['inventory'][firm_id] = 0
+            self.firms['num_workers'][firm_id] = 0
+            self.firms['debt'][firm_id] = 0 # Debt is written off
+            total_payout[firm_id] = 0 # Cannot pay wages
+
+        # --- Payday for Solvent Firms ---
+        solvent_mask = ~bankrupt_mask
+        self.firms['balance'][solvent_mask] -= total_payout[solvent_mask]
         
         num_workers = self.firms['num_workers']
         wage_per_worker = np.divide(total_payout, num_workers, out=np.zeros_like(total_payout), where=num_workers!=0)
@@ -300,7 +366,7 @@ class Simulation:
         self.households['balance'][employed_mask] += wage_per_worker[employer_ids]
         
         for firm_id, payout in enumerate(total_payout):
-            if payout > 0:
+            if payout > 0 and not self.firms['is_bankrupt'][firm_id]:
                 worker_ids = np.where(self.households['employer_id'] == firm_id)[0]
                 individual_wage = wage_per_worker[firm_id]
                 for worker_id in worker_ids:
@@ -312,10 +378,30 @@ class Simulation:
     def _labor_market_phase(self, total_payout, summary):
         """Firms hire and fire workers based on economic conditions."""
         logger.debug("Start Labor Market Phase")
+        active_mask = ~self.firms['is_bankrupt']
 
-        # Firing Logic
+        # --- Strategic Layoffs to meet new targets ---
+        downsizing_mask = (self.firms['num_workers'] > self.firms['target_num_workers']) & active_mask
+        for firm_id in np.where(downsizing_mask)[0]:
+            surplus = self.firms['num_workers'][firm_id] - self.firms['target_num_workers'][firm_id]
+            employee_indices = np.where(self.households['employer_id'] == firm_id)[0]
+            
+            if surplus > len(employee_indices):
+                surplus = len(employee_indices) # Cannot fire more than you have
+
+            if surplus > 0:
+                layoff_candidates = np.random.choice(employee_indices, size=surplus, replace=False)
+                self.households['employer_id'][layoff_candidates] = -1
+                self.firms['num_workers'][firm_id] -= surplus
+                logger.info(
+                    "Firm %d is strategically laying off %d worker(s) to meet new target of %d.",
+                    firm_id, surplus, self.firms['target_num_workers'][firm_id]
+                )
+
+        # --- Emergency Firing Logic (due to low capital) ---
         layoff_threshold = total_payout * self.config['firm_layoff_capital_threshold_factor']
-        firms_that_should_fire = np.where((self.firms['balance'] < layoff_threshold) & (self.firms['num_workers'] > 0))[0]
+        should_fire_mask = (self.firms['balance'] < layoff_threshold) & (self.firms['num_workers'] > 0) & active_mask
+        firms_that_should_fire = np.where(should_fire_mask)[0]
         for firm_id in firms_that_should_fire:
             employee_indices = np.where(self.households['employer_id'] == firm_id)[0]
             if len(employee_indices) > 0:
@@ -330,7 +416,7 @@ class Simulation:
         
         if len(unemployed_hh_indices) > 0:
             hiring_revenue_threshold = total_payout * self.config['firm_hiring_revenue_threshold_factor']
-            hiring_firms_mask = (self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers'])
+            hiring_firms_mask = (self.firms['balance'] > hiring_revenue_threshold) & (self.firms['num_workers'] < self.firms['target_num_workers']) & active_mask
             hiring_firm_ids = np.where(hiring_firms_mask)[0]
 
             if len(hiring_firm_ids) > 0:
@@ -368,8 +454,9 @@ class Simulation:
             current_employer_id = self.households['employer_id'][hh_id]
             current_wage = self.firms['wage_rate'][current_employer_id]
             
-            # Find the best alternative job offer
-            potential_employers = np.where(self.firms['wage_rate'] > current_wage * job_switching_threshold)[0]
+            # Find the best alternative job offer (only from non-bankrupt firms)
+            potential_employers_mask = (self.firms['wage_rate'] > current_wage * job_switching_threshold) & active_mask
+            potential_employers = np.where(potential_employers_mask)[0]
             
             if len(potential_employers) > 0:
                 # Find the highest paying alternative employer
@@ -394,60 +481,115 @@ class Simulation:
         summary['unemployment_rate'] = (np.count_nonzero(self.households['employer_id'] == -1) / self.config['N_H']) * 100
 
     def _firm_adjustment_phase(self, summary):
-        """Firms adjust prices based on inventory and wages based on unemployment."""
+        """Firms make strategic decisions about price and production to maximize profit."""
         logger.debug("Start Firm Adjustment Phase")
+        active_mask = ~self.firms['is_bankrupt']
+        if not np.any(active_mask): return
 
-        # Dynamic Target Inventory Calculation
-        # A firm's target inventory is to hold a buffer equivalent to a certain number of ticks of its own production.
-        prod_rate = self.firms['num_workers'] * self.config['production_per_worker']
-        ticks_of_prod_to_hold = self.config['target_inventory_production_ticks_factor']
-        self.firms['target_inventory'] = prod_rate * ticks_of_prod_to_hold
-        logger.debug(
-            "Firms updated target inventories. Example Firm 0: Target=%d (based on %d workers)",
-            self.firms['target_inventory'][0], self.firms['num_workers'][0]
-        )
+        # --- Step 1: Assess Profit Situation ---
+        profit = self.firms['profit_last_tick']
+        prev_profit = self.firms['previous_profit']
         
-        # Price Adjustments
-        upper_thresh = self.firms['target_inventory'] * self.config['inventory_upper_threshold_factor']
-        lower_thresh = self.firms['target_inventory'] * self.config['inventory_lower_threshold_factor']
-        old_prices = self.firms['price'].copy()
-        adj_rate = self.config['price_adjustment_rate']
-        self.firms['price'][self.firms['inventory'] < lower_thresh] *= (1 + adj_rate)
-        self.firms['price'][self.firms['inventory'] > upper_thresh] *= (1 - adj_rate)
-        if len(np.where(old_prices != self.firms['price'])[0]) > 0:
-            logger.info("%d firms adjusted their prices this tick.", len(np.where(old_prices != self.firms['price'])[0]))
+        profit_fell_mask = (profit < prev_profit) & active_mask
+        self.firms['ticks_of_falling_profit'][profit_fell_mask] += 1
+        
+        profit_rose_mask = (profit >= prev_profit) & active_mask
+        self.firms['ticks_of_falling_profit'][profit_rose_mask] = 0
 
-        # Competitive Wage Adjustments
-        increase_rate = self.config.get('competitive_wage_increase_rate', 0.02)
+        # --- Step 2: Choose Mode (Exploration vs. Exploitation) ---
+        crisis_threshold = self.config['profit_crisis_threshold']
+        crisis_mask = (self.firms['ticks_of_falling_profit'] > crisis_threshold) & active_mask
+        normal_mask = ~crisis_mask & active_mask
 
-        # Condition 1: Proactive wage increase by profitable firms
-        current_wage_bill = self.firms['num_workers'] * self.firms['wage_rate']
-        profitability_threshold = current_wage_bill * self.config['firm_hiring_revenue_threshold_factor']
-        profitable_firms = (self.firms['balance'] > profitability_threshold)
+        # --- Step 3: Execute Logic Based on Mode ---
+        
+        # --- Mode A: CRISIS / EXPLORATION ---
+        if np.any(crisis_mask):
+            for firm_id in np.where(crisis_mask)[0]:
+                logger.warning(
+                    "FIRM CRISIS: Firm %d profit fell for %d ticks. Slashing price to find demand.",
+                    firm_id, self.firms['ticks_of_falling_profit'][firm_id]
+                )
+                # 1. Drastic Price Cut
+                cut_rate = self.config['crisis_price_cut_rate']
+                self.firms['price'][firm_id] *= (1 - cut_rate)
+                self.firms['last_price_direction'][firm_id] = -1 # Force downward exploration
+                
+                # 2. Aggressive Workforce Reduction
+                # Cut target workforce by a significant margin to reduce costs
+                new_target = int(self.firms['num_workers'][firm_id] * 0.75)
+                self.firms['target_num_workers'][firm_id] = max(self.config['min_target_workers'], new_target)
 
-        # Condition 2: Reactive wage increase from losing an employee
-        lost_employee_firms = self.firms['failed_to_hire_last_tick']
+                # 3. Reset Crisis Counter
+                self.firms['ticks_of_falling_profit'][firm_id] = 0
 
-        # Combine conditions: A firm will raise wages if it's profitable OR it lost an employee
-        firms_raising_wages = np.where(profitable_firms | lost_employee_firms)[0]
-
-        for firm_id in firms_raising_wages:
-            old_wage = self.firms['wage_rate'][firm_id]
-            new_wage = old_wage * (1 + increase_rate)
-            self.firms['wage_rate'][firm_id] = new_wage
+        # --- Mode B: NORMAL / EXPLOITATION ---
+        if np.any(normal_mask):
+            # 1. Make Incremental Price Adjustments
+            adj_rate = self.config['price_adjustment_rate']
             
-            # Log the reason for the wage increase
-            if profitable_firms[firm_id] and not lost_employee_firms[firm_id]:
-                reason = "is profitable, proactively"
-            elif lost_employee_firms[firm_id]:
-                reason = "lost an employee,"
-            else: # Should not happen but for completeness
-                reason = "is adjusting"
+            # If profit rose, continue last direction
+            profit_grew_mask = (profit > prev_profit) & normal_mask
+            increase_mask = (self.firms['last_price_direction'] == 1) & profit_grew_mask
+            self.firms['price'][increase_mask] *= (1 + adj_rate)
+            decrease_mask = (self.firms['last_price_direction'] == -1) & profit_grew_mask
+            self.firms['price'][decrease_mask] *= (1 - adj_rate)
 
-            logger.info(
-                "Firm %d %s increasing wage from %.2f to %.2f.",
-                firm_id, reason, old_wage, new_wage
-            )
+            # If profit was stable, use inventory as a tie-breaker
+            profit_stable_mask = (profit == prev_profit) & normal_mask
+            ticks_of_sales_to_hold = self.config['target_inventory_production_ticks_factor']
+            target_inv = self.firms['units_sold_last_tick'] * ticks_of_sales_to_hold
+            
+            inv_increase_mask = (self.firms['inventory'] < target_inv) & profit_stable_mask
+            self.firms['price'][inv_increase_mask] *= (1 + adj_rate)
+            self.firms['last_price_direction'][inv_increase_mask] = 1
+
+            inv_decrease_mask = (self.firms['inventory'] > target_inv) & profit_stable_mask
+            self.firms['price'][inv_decrease_mask] *= (1 - adj_rate)
+            self.firms['last_price_direction'][inv_decrease_mask] = -1
+
+            # 2. Adjust Workforce Target Based on Sales
+            # Target enough workers to meet recent demand plus a small buffer
+            production_per_worker = self.config['production_per_worker']
+            target_production = self.firms['units_sold_last_tick'] * 1.1 # 10% buffer
+            new_target_workers = np.ceil(target_production / production_per_worker).astype(int)
+            
+            # --- PROFITABILITY GATEKEEPER ---
+            # An unprofitable firm cannot hire. It can only maintain or downsize.
+            unprofitable_mask = (self.firms['profit_last_tick'] < 0) & normal_mask
+            if np.any(unprofitable_mask):
+                # Cap the target at the current number of workers for unprofitable firms
+                current_workers = self.firms['num_workers'][unprofitable_mask]
+                capped_targets = np.minimum(new_target_workers[unprofitable_mask], current_workers)
+                new_target_workers[unprofitable_mask] = capped_targets
+                for firm_id in np.where(unprofitable_mask)[0]:
+                    if new_target_workers[firm_id] < self.firms['target_num_workers'][firm_id]:
+                         logger.info(
+                            "FIRM STRATEGY: Firm %d is unprofitable. Overriding hiring target.", firm_id
+                        )
+
+            self.firms['target_num_workers'][normal_mask] = np.maximum(self.config['min_target_workers'], new_target_workers[normal_mask])
+
+        # --- Final Price Floor Enforcement ---
+        # A firm is forbidden from selling a product for less than its marginal cost.
+        # This is the absolute floor for any price adjustment.
+        old_prices_for_floor_check = self.firms['price'].copy()
+        
+        raw_material_cost = self.config['raw_material_cost_per_unit']
+        prod_per_worker = self.config['production_per_worker']
+        marginal_cost = raw_material_cost + (self.firms['wage_rate'] / prod_per_worker)
+        
+        price_floor_mask = (self.firms['price'] < marginal_cost) & active_mask
+        if np.any(price_floor_mask):
+            self.firms['price'][price_floor_mask] = marginal_cost[price_floor_mask]
+            for firm_id in np.where(price_floor_mask)[0]:
+                logger.info(
+                    "FIRM STRATEGY: Firm %d price adjustment from %.2f blocked by production cost floor of %.2f.",
+                    firm_id, old_prices_for_floor_check[firm_id], marginal_cost[firm_id]
+                )
+
+        # --- Step 4: Update Memory for Next Tick ---
+        self.firms['previous_profit'] = self.firms['profit_last_tick']
 
     def _banking_phase(self):
         """Firms service their debt and may take loans from the bank."""
@@ -482,15 +624,6 @@ class Simulation:
                     total_collected, self.banks['balance'][0]
                 )
 
-        # --- Loan Issuance ---
-        lookahead = self.config['loan_trigger_lookahead_ticks']
-        future_expenses = (self.firms['num_workers'] * self.firms['wage_rate']) * lookahead
-        needs_loan = np.where((self.firms['balance'] < future_expenses) & (self.firms['balance'] > 0))[0]
-
-        if len(needs_loan) > 0:
-            multiplier = self.config['loan_amount_multiplier']
-            for firm_id in needs_loan:
-                loan_amount = future_expenses[firm_id] * multiplier
-                self.firms['balance'][firm_id] += loan_amount
-                self.firms['debt'][firm_id] += loan_amount
-                logger.info("Firm %d took a loan of %.2f. New total debt is %.2f.", firm_id, loan_amount, self.firms['debt'][firm_id])
+        # --- Loan Issuance (DISABLED) ---
+        # This logic has been removed to prevent infinite debt loops and enable firm failure.
+        # Firms must now manage their capital without automatic bailouts.
