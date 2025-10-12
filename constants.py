@@ -47,6 +47,10 @@ AGENT_OUTLINE_WIDTH = 2 # Width of the agent's outline in pixels
 FONT_FACE = "Arial"
 FONT_SIZE = 12
 
+# --- Ownership Visualization ---
+COLOR_OWNERSHIP_LINE = (255, 255, 255) # White
+OWNERSHIP_LINE_WIDTH = 1
+
 #======================================
 # GRAPH VISUALIZATION SETTINGS
 #======================================

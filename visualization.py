@@ -68,6 +68,14 @@ def draw_agent_bodies(surface, agent_positions, color):
         pygame.gfxdraw.aacircle(surface, x, y, C.AGENT_RADIUS, color)
         pygame.gfxdraw.filled_circle(surface, x, y, C.AGENT_RADIUS, color)
 
+def draw_ownership_links(surface, firm_positions, household_positions, firm_owner_map):
+    """Draws lines connecting firms to their owner households."""
+    for firm_id, owner_id in firm_owner_map.items():
+        firm_pos = firm_positions.get(firm_id)
+        owner_pos = household_positions.get(owner_id)
+        if firm_pos and owner_pos:
+            pygame.draw.aaline(surface, C.COLOR_OWNERSHIP_LINE, firm_pos, owner_pos, C.OWNERSHIP_LINE_WIDTH)
+
 def draw_graph(surface, graph_data, font, x, y, width, height, title):
     """Draws a dynamic, auto-scaling graph with axes, labels, and a legend."""
     graph_rect = pygame.Rect(x, y, width, height)

@@ -73,11 +73,12 @@ def main():
                 if tick_counter > 0 and tick_counter % 5 == 0:
                     # Log the high-level summary
                     logger.info(
-                        "--- Tick %d Summary --- Sales: $%.2f (%d units) | Wages: $%.2f | Unemployment: %.1f%%",
+                        "--- Tick %d Summary --- Sales: $%.2f (%d units) | Wages: $%.2f | Dividends: $%.2f | Unemployment: %.1f%%",
                         tick_counter,
                         summary.get('total_sales_volume', 0.0),
                         summary.get('total_sales_units', 0),
                         summary.get('total_wages_paid', 0.0),
+                        summary.get('total_dividends_paid', 0.0),
                         summary.get('unemployment_rate', 0.0)
                     )
 
@@ -179,6 +180,9 @@ def main():
             viz.draw_agent_bodies(screen, sim.firm_positions, C.COLOR_FIRM)
             viz.draw_agent_bodies(screen, sim.household_positions, C.COLOR_HOUSEHOLD)
             viz.draw_agent_bodies(screen, sim.bank_positions, C.COLOR_BANK)
+
+            # Draw ownership links after bodies so they render on top
+            viz.draw_ownership_links(screen, sim.firm_positions, sim.household_positions, sim.firm_owner_map)
                 
             active_particles = [p for p in active_particles if not p.finished]
             
