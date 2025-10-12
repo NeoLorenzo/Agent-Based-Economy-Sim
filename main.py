@@ -37,6 +37,8 @@ def main():
     logger.info("RNGs seeded with master seed: %d", master_seed)
     
     sim = Simulation(config)
+    event_log_aggregator = collections.Counter()
+    summary_aggregator = collections.Counter()
     
     inventory_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     price_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
@@ -63,18 +65,47 @@ def main():
                 time_since_last_tick -= time_per_tick
                 context_filter.tick = tick_counter
                 
-                transactions, summary = sim.run_one_tick(tick_counter)
-                if tick_counter % 100 == 0 or tick_counter == 1:
+                transactions, summary, tick_events = sim.run_one_tick(tick_counter)
+                event_log_aggregator.update(tick_events)
+                summary_aggregator.update(summary)
+                
+                # Log a detailed summary every 5 ticks.
+                if tick_counter > 0 and tick_counter % 5 == 0:
+                    # Log the high-level summary
                     logger.info(
-                        "Tick %d Summary: Sales: $%.2f (%d units), Wages: $%.2f, Restock: $%.2f (%d units), Unemployment: %.1f%%",
+                        "--- Tick %d Summary --- Sales: $%.2f (%d units) | Wages: $%.2f | Unemployment: %.1f%%",
                         tick_counter,
-                        summary['total_sales_volume'],
-                        summary['total_sales_units'],
-                        summary['total_wages_paid'],
-                        summary['total_restock_cost'],
-                        summary['total_restock_units'],
-                        summary['unemployment_rate']
+                        summary.get('total_sales_volume', 0.0),
+                        summary.get('total_sales_units', 0),
+                        summary.get('total_wages_paid', 0.0),
+                        summary.get('unemployment_rate', 0.0)
                     )
+                    # Log the detailed state of each active firm
+                    for i, firm in enumerate(sim.firms):
+                        if not firm['is_bankrupt']:
+                            logger.info(
+                                "  Firm %d: Bal: %8.2f | Inv: %5d | Price: %5.2f | Workers: %3d/%3d | Profit: %8.2f",
+                                i,
+                                firm['balance'],
+                                firm['inventory'],
+                                firm['price'],
+                                firm['num_workers'],
+                                firm['target_num_workers'],
+                                firm['profit_last_tick']
+                            )
+                    # Log the aggregated production stats over the last 5 ticks
+                    logger.info(
+                        "  Production (last 5 ticks): %d units | Total Material Cost (re-distributed): $%.2f",
+                        summary_aggregator['total_production_units'],
+                        summary_aggregator['total_production_cost']
+                    )
+                    summary_aggregator.clear()
+
+                    # Log the aggregated events over the last 5 ticks
+                    if event_log_aggregator:
+                        event_str = " | ".join(f"{key.replace('_', ' ').title()}: {val}" for key, val in sorted(event_log_aggregator.items()))
+                        logger.info("  Events (last 5 ticks): %s", event_str)
+                        event_log_aggregator.clear()
 
                 inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data = sim.update_and_get_firm_data_for_render()
                 

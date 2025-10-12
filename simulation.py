@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 #======================================
 
 import constants as C
+import collections
 
 class Simulation:
     """
@@ -20,6 +21,7 @@ class Simulation:
     """
     def __init__(self, config):
         self.config = config
+        self.tick_events = collections.Counter()
         
         # Agent positions are now generated and stored internally
         self.firm_positions = {}
@@ -93,6 +95,7 @@ class Simulation:
             ('profit_last_tick', 'f8'),
             ('previous_profit', 'f8'),
             ('ticks_of_falling_profit', 'i4'),
+            ('ticks_of_stable_profit', 'i4'),
             ('last_price_direction', 'i4'),
             ('num_workers', 'i4'),
             ('target_num_workers', 'i4'),
@@ -133,16 +136,19 @@ class Simulation:
         # All firms start with zero workers but have a target number of workers.
         # This target can be adjusted later based on performance.
         self.firms['num_workers'] = 0
-        # For now, let's assume firms want to hire a proportional share of the workforce.
-        # This is an initial target; their actual hiring will be constrained by revenue.
-        initial_target_workers = math.ceil(self.config['N_H'] / self.config['N_F'])
+        # Firms start small and must grow based on their success.
+        initial_target_workers = 1
         self.firms['target_num_workers'] = initial_target_workers
         
         # --- Define data structure for Banks ---
         bank_dtype = [('balance', 'f8')]
         self.banks = np.zeros(self.config.get('N_B', 0), dtype=bank_dtype)
         # The bank has infinite capital for now; we represent this with a very large number.
-        self.banks['balance'] = 1e12 
+        self.banks['balance'] = 1e12
+
+        # Create a separate array to hold the moving average of sales for each firm
+        history_ticks = self.config.get('sales_history_ticks', 10)
+        self.firm_sales_history = np.zeros((self.config['N_F'], history_ticks), dtype=int)
         
         logger.debug("Created %d households and assigned them to firms.", self.config['N_H'])
         logger.info("World setup complete.")
@@ -203,9 +209,10 @@ class Simulation:
         """
         Executes one full cycle of the simulation by calling phase-specific methods.
         This method orchestrates the high-level flow of a single tick.
-        Returns a list of transactions for visualization and a summary for logging.
+        Returns transactions, a summary dict, and a Counter of key events.
         """
         self._current_tick = current_tick
+        self.tick_events.clear() # Reset for the new tick
         transactions = []
         summary = {
             'total_restock_cost': 0.0, 'total_restock_units': 0,
@@ -220,7 +227,7 @@ class Simulation:
         self._firm_adjustment_phase(summary)
         self._banking_phase()
 
-        return transactions, summary
+        return transactions, summary, self.tick_events
 
     def _production_phase(self, summary):
         """Firms produce new goods based on their workforce."""
@@ -254,13 +261,6 @@ class Simulation:
         if total_cost > 0:
             income_per_household = total_cost / self.config['N_H']
             self.households['balance'] += income_per_household
-            logger.info("Distributed $%.2f in raw material costs as income to households.", total_cost)
-        
-        if total_produced > 0:
-            logger.info(
-                "Total production this tick: %d units at a total raw material cost of $%.2f.",
-                total_produced, total_cost
-            )
         
         # Update summary (renaming fields for clarity)
         summary['total_production_units'] = total_produced
@@ -316,6 +316,12 @@ class Simulation:
                 summary['total_sales_units'] += sold_quantity
                 summary['total_sales_volume'] += amount
                 transactions.append({'type': 'spending', 'from_id': hh_id, 'to_id': firm_id, 'amount': amount})
+
+        # After all shopping is done, update the sales history
+        # Roll the array to make space for the new data
+        self.firm_sales_history = np.roll(self.firm_sales_history, 1, axis=1)
+        # Insert the latest sales data into the first column
+        self.firm_sales_history[:, 0] = self.firms['units_sold_last_tick']
 
     def _payday_phase(self, transactions, summary):
         """Firms pay wages to their employees. Firms that cannot pay go bankrupt."""
@@ -393,10 +399,7 @@ class Simulation:
                 layoff_candidates = np.random.choice(employee_indices, size=surplus, replace=False)
                 self.households['employer_id'][layoff_candidates] = -1
                 self.firms['num_workers'][firm_id] -= surplus
-                logger.info(
-                    "Firm %d is strategically laying off %d worker(s) to meet new target of %d.",
-                    firm_id, surplus, self.firms['target_num_workers'][firm_id]
-                )
+                self.tick_events['strategic_layoffs'] += surplus
 
         # --- Emergency Firing Logic (due to low capital) ---
         layoff_threshold = total_payout * self.config['firm_layoff_capital_threshold_factor']
@@ -408,7 +411,7 @@ class Simulation:
                 layoff_candidate_idx = np.random.choice(employee_indices, size=min(1, len(employee_indices)), replace=False)
                 self.households['employer_id'][layoff_candidate_idx] = -1
                 self.firms['num_workers'][firm_id] -= len(layoff_candidate_idx)
-                logger.info("Firm %d laid off %d worker(s) due to low capital.", firm_id, len(layoff_candidate_idx))
+                self.tick_events['emergency_layoffs'] += len(layoff_candidate_idx)
 
         # Hiring Logic
         self.firms['failed_to_hire_last_tick'][:] = False
@@ -441,7 +444,7 @@ class Simulation:
                     self.households['employer_id'][worker_id] = firm_id
                     self.firms['num_workers'][firm_id] += 1
                     self.firms['failed_to_hire_last_tick'][firm_id] = False
-                    logger.info("Firm %d hired 1 new worker (Wage: %.2f).", firm_id, job['wage'])
+                    self.tick_events['hires'] += 1
 
         # Job Switching Logic for Employed Households
         employed_mask = self.households['employer_id'] != -1
@@ -473,10 +476,7 @@ class Simulation:
                 # The firm that lost an employee is now under pressure to raise wages
                 self.firms['failed_to_hire_last_tick'][current_employer_id] = True
                 
-                logger.info(
-                    "Household %d switched employer from Firm %d to Firm %d for a higher wage (New: %.2f, Old: %.2f).",
-                    hh_id, current_employer_id, best_new_employer_id, new_wage, old_wage
-                )
+                self.tick_events['job_switches'] += 1
 
         summary['unemployment_rate'] = (np.count_nonzero(self.households['employer_id'] == -1) / self.config['N_H']) * 100
 
@@ -505,11 +505,8 @@ class Simulation:
         
         # --- Mode A: CRISIS / EXPLORATION ---
         if np.any(crisis_mask):
+            self.tick_events['crisis_triggers'] += np.sum(crisis_mask)
             for firm_id in np.where(crisis_mask)[0]:
-                logger.warning(
-                    "FIRM CRISIS: Firm %d profit fell for %d ticks. Slashing price to find demand.",
-                    firm_id, self.firms['ticks_of_falling_profit'][firm_id]
-                )
                 # 1. Drastic Price Cut
                 cut_rate = self.config['crisis_price_cut_rate']
                 self.firms['price'][firm_id] *= (1 - cut_rate)
@@ -525,6 +522,13 @@ class Simulation:
 
         # --- Mode B: NORMAL / EXPLOITATION ---
         if np.any(normal_mask):
+            # --- Update Stability Counter ---
+            # Increment for profitable firms, reset for unprofitable ones.
+            profitable_mask = (self.firms['profit_last_tick'] > 0) & normal_mask
+            self.firms['ticks_of_stable_profit'][profitable_mask] += 1
+            unprofitable_mask = (self.firms['profit_last_tick'] <= 0) & normal_mask
+            self.firms['ticks_of_stable_profit'][unprofitable_mask] = 0
+
             # 1. Make Incremental Price Adjustments
             adj_rate = self.config['price_adjustment_rate']
             
@@ -535,10 +539,14 @@ class Simulation:
             decrease_mask = (self.firms['last_price_direction'] == -1) & profit_grew_mask
             self.firms['price'][decrease_mask] *= (1 - adj_rate)
 
+            # --- Calculate Smoothed Average Sales ---
+            # Firms base strategic decisions on the trend, not single-tick noise.
+            average_sales = np.mean(self.firm_sales_history, axis=1)
+
             # If profit was stable, use inventory as a tie-breaker
             profit_stable_mask = (profit == prev_profit) & normal_mask
             ticks_of_sales_to_hold = self.config['target_inventory_production_ticks_factor']
-            target_inv = self.firms['units_sold_last_tick'] * ticks_of_sales_to_hold
+            target_inv = average_sales * ticks_of_sales_to_hold
             
             inv_increase_mask = (self.firms['inventory'] < target_inv) & profit_stable_mask
             self.firms['price'][inv_increase_mask] *= (1 + adj_rate)
@@ -548,27 +556,71 @@ class Simulation:
             self.firms['price'][inv_decrease_mask] *= (1 - adj_rate)
             self.firms['last_price_direction'][inv_decrease_mask] = -1
 
-            # 2. Adjust Workforce Target Based on Sales
-            # Target enough workers to meet recent demand plus a small buffer
-            production_per_worker = self.config['production_per_worker']
-            target_production = self.firms['units_sold_last_tick'] * 1.1 # 10% buffer
-            new_target_workers = np.ceil(target_production / production_per_worker).astype(int)
+            # 2. Adjust Workforce Target Based on Inventory, Sales, and Ambition
+            # First, calculate the conservative target based on inventory needs using SMOOTHED sales data.
+            ticks_of_sales_to_hold = self.config['target_inventory_production_ticks_factor']
+            desired_inventory = average_sales[normal_mask] * ticks_of_sales_to_hold
+            current_inventory = self.firms['inventory']
+            production_need = desired_inventory - current_inventory
             
+            production_per_worker = self.config['production_per_worker']
+            new_target_workers = np.ceil(np.maximum(0, production_need) / production_per_worker).astype(int)
+            
+            # If inventory is in surplus, target is minimum.
+            surplus_mask = (production_need <= 0) & normal_mask
+            new_target_workers[surplus_mask] = self.config['min_target_workers']
+
+            # --- AMBITION LOGIC ---
+            # If a firm has been stable for a long time, it may attempt to expand.
+            ambition_threshold = self.config['ambition_threshold']
+            ambitious_mask = (self.firms['ticks_of_stable_profit'] > ambition_threshold) & normal_mask
+            if np.any(ambitious_mask):
+                self.tick_events['ambition_triggers'] += np.sum(ambitious_mask)
+                current_workers = self.firms['num_workers'][ambitious_mask]
+                # Expand by 20% or at least 1 worker, whichever is greater.
+                expansion_targets = np.maximum(np.ceil(current_workers * 1.2).astype(int), current_workers + 1)
+                # This ambitious target OVERWRITES the conservative one.
+                new_target_workers[ambitious_mask] = expansion_targets
+                
+                for firm_id in np.where(ambitious_mask)[0]:
+                    logger.info(
+                        "FIRM STRATEGY: Firm %d is stable. Experimenting with expansion to %d workers.",
+                        firm_id, new_target_workers[firm_id]
+                    )
+                # Reset counter to prevent continuous expansion.
+                self.firms['ticks_of_stable_profit'][ambitious_mask] = 0
+
             # --- PROFITABILITY GATEKEEPER ---
             # An unprofitable firm cannot hire. It can only maintain or downsize.
             unprofitable_mask = (self.firms['profit_last_tick'] < 0) & normal_mask
             if np.any(unprofitable_mask):
-                # Cap the target at the current number of workers for unprofitable firms
                 current_workers = self.firms['num_workers'][unprofitable_mask]
-                capped_targets = np.minimum(new_target_workers[unprofitable_mask], current_workers)
-                new_target_workers[unprofitable_mask] = capped_targets
-                for firm_id in np.where(unprofitable_mask)[0]:
-                    if new_target_workers[firm_id] < self.firms['target_num_workers'][firm_id]:
-                         logger.info(
-                            "FIRM STRATEGY: Firm %d is unprofitable. Overriding hiring target.", firm_id
-                        )
+                # Cap the target at the current number of workers.
+                new_target_workers[unprofitable_mask] = np.minimum(new_target_workers[unprofitable_mask], current_workers)
+            
+            # --- BUDGETARY CONSTRAINT ---
+            # A firm cannot set a target that requires hiring more workers than it can afford.
+            budget_rate = self.config['expansion_budget_rate']
+            capital_for_expansion = self.firms['balance'][normal_mask] * budget_rate
+            
+            # Define production constants locally for cost calculation
+            raw_material_cost = self.config['raw_material_cost_per_unit']
+            production_per_worker = self.config['production_per_worker']
 
-            self.firms['target_num_workers'][normal_mask] = np.maximum(self.config['min_target_workers'], new_target_workers[normal_mask])
+            # Estimate the cost of a single new hire for one tick (wage + materials)
+            cost_per_new_hire = self.firms['wage_rate'][normal_mask] + (raw_material_cost * production_per_worker)
+            # Avoid division by zero if cost is somehow zero
+            cost_per_new_hire[cost_per_new_hire == 0] = 1 
+            
+            affordable_new_hires = (capital_for_expansion / cost_per_new_hire).astype(int)
+            
+            current_workers = self.firms['num_workers'][normal_mask]
+            max_affordable_target = current_workers + affordable_new_hires
+            
+            # Cap the final target at what is affordable
+            final_target = np.minimum(new_target_workers[normal_mask], max_affordable_target)
+
+            self.firms['target_num_workers'][normal_mask] = np.maximum(self.config['min_target_workers'], final_target)
 
         # --- Final Price Floor Enforcement ---
         # A firm is forbidden from selling a product for less than its marginal cost.
