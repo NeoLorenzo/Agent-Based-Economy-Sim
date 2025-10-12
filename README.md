@@ -153,3 +153,21 @@ The interaction of these systems produces a robust, multi-stage economic narrati
 *   **Documented Abstractions:** When real-world processes are simplified, the assumptions and limitations are explicitly documented.
 
 </details>
+
+## Roadmap & Future Work
+
+The simulation's current primary challenge is a systemic failure mode: it consistently falls into a **liquidity trap** where firms and a few owner-households hoard nearly all the economy's wealth, causing a collapse in consumer demand and mass unemployment. This is caused by a "leaking bucket" effect, where the mechanisms for returning money to the general household sector are insufficient to counteract the wealth extracted through sales. This is exacerbated by the current major abstraction of a "magical" raw material cost, where money spent on resources is instantly and equally redistributed to all households.
+
+The central aim of future development is to solve this systemic imbalance through two complementary strategies:
+
+1.  **Developing a Realistic Supply Chain:** The raw material abstraction will be replaced with an ecosystem of specialized firms. The hypothesis is that creating a robust business-to-business (B2B) economy will force firms to pay each other for goods and services. This will require a larger, more diverse workforce, naturally circulating more money back into the household sector through wages and plugging the systemic leak from the production side.
+
+2.  **Introducing a Luxury Sector:** To combat wealth hoarding by high-income households, a new class of expensive, non-essential goods and services will be introduced. This creates a "wealth sink" for the richest agents, giving them a way to spend their excess capital. This spending redistributes wealth from the top to the workers and owners of the luxury firms, creating a new, realistic channel for money to flow back into the general population and stimulating the demand side of the economy.
+
+Potential new firm types to be implemented include:
+
+*   **Primary Producers:** Firms that extract raw materials (e.g., **Mines, Farms, Lumber Mills**), forming the base of the supply chain.
+*   **Intermediate Goods Producers:** Firms that process raw materials into components (e.g., **Smelters, Refineries, Weavers**), selling exclusively to other businesses.
+*   **Capital Goods Producers:** Firms that build the "machinery" other firms need to operate (e.g., **Tool & Die Shops, Factory Constructors**), introducing capital investment and depreciation.
+*   **Energy Producers:** A utility firm that sells a necessary input (energy) to all other firms and households, creating a constant B2B and B2C cost.
+*   **Luxury Sector Firms:** Businesses that cater exclusively to high-wealth households, such as **Artisan Workshops** (producing high-cost goods) or **High-End Service Providers** (entertainment, bespoke services).
