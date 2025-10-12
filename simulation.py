@@ -423,6 +423,7 @@ class Simulation:
             hiring_firm_ids = np.where(hiring_firms_mask)[0]
 
             if len(hiring_firm_ids) > 0:
+                # A firm is considered to have failed to hire until it proves it has met its target.
                 self.firms['failed_to_hire_last_tick'][hiring_firm_ids] = True
                 
                 open_positions = []
@@ -443,8 +444,16 @@ class Simulation:
                     
                     self.households['employer_id'][worker_id] = firm_id
                     self.firms['num_workers'][firm_id] += 1
-                    self.firms['failed_to_hire_last_tick'][firm_id] = False
+                    # BUG FIX: Do NOT set the flag to False here. A firm has not succeeded
+                    # until it has filled ALL its open positions.
                     self.tick_events['hires'] += 1
+
+                # NEW: After the hiring loop, check which firms actually met their targets.
+                # Only these firms will have their "failed_to_hire" flag cleared.
+                successful_hires_mask = (self.firms['num_workers'] >= self.firms['target_num_workers'])
+                # We only care about firms that were hiring in the first place.
+                final_success_mask = successful_hires_mask & hiring_firms_mask
+                self.firms['failed_to_hire_last_tick'][final_success_mask] = False
 
         # Job Switching Logic for Employed Households
         employed_mask = self.households['employer_id'] != -1
@@ -523,38 +532,62 @@ class Simulation:
         # --- Mode B: NORMAL / EXPLOITATION ---
         if np.any(normal_mask):
             # --- Update Stability Counter ---
-            # Increment for profitable firms, reset for unprofitable ones.
             profitable_mask = (self.firms['profit_last_tick'] > 0) & normal_mask
             self.firms['ticks_of_stable_profit'][profitable_mask] += 1
             unprofitable_mask = (self.firms['profit_last_tick'] <= 0) & normal_mask
             self.firms['ticks_of_stable_profit'][unprofitable_mask] = 0
 
-            # 1. Make Incremental Price Adjustments
+            # --- Wage Adjustment Logic ---
+            # The wage rate is now dynamic based on competing market pressures.
+
+            # 1. Upward Pressure (Worker's Market): Firms must raise wages if they fail to hire or retain workers.
+            increase_rate = self.config['competitive_wage_increase_rate']
+            failed_to_hire_mask = self.firms['failed_to_hire_last_tick'] & normal_mask
+            if np.any(failed_to_hire_mask):
+                self.firms['wage_rate'][failed_to_hire_mask] *= (1 + increase_rate)
+                self.tick_events['wage_increases'] += np.sum(failed_to_hire_mask)
+
+            # 2. Downward Pressure (Employer's Market): If unemployment is high, firms can lower wages.
+            unemployment_rate = summary.get('unemployment_rate', 0.0) / 100.0 # Convert to 0-1 scale
+            unemployment_threshold = self.config.get('wage_cut_unemployment_threshold', 0.10)
+            if unemployment_rate > unemployment_threshold:
+                cut_rate = self.config.get('wage_cut_rate', 0.01)
+                # This pressure opposes the upward pressure. A firm that failed to hire might still
+                # cut wages if unemployment is high, but the cut will be smaller than the increase.
+                self.firms['wage_rate'][normal_mask] *= (1 - cut_rate)
+                self.tick_events['wage_cuts'] += np.sum(normal_mask)
+
+            # --- New Pricing Logic (Replaces profit-delta logic) ---
             adj_rate = self.config['price_adjustment_rate']
             
-            # If profit rose, continue last direction
-            profit_grew_mask = (profit > prev_profit) & normal_mask
-            increase_mask = (self.firms['last_price_direction'] == 1) & profit_grew_mask
-            self.firms['price'][increase_mask] *= (1 + adj_rate)
-            decrease_mask = (self.firms['last_price_direction'] == -1) & profit_grew_mask
-            self.firms['price'][decrease_mask] *= (1 - adj_rate)
-
-            # --- Calculate Smoothed Average Sales ---
-            # Firms base strategic decisions on the trend, not single-tick noise.
+            # BUG FIX: Calculate average_sales here, outside the conditional block.
+            # It is needed for both pricing and workforce target calculations.
             average_sales = np.mean(self.firm_sales_history, axis=1)
 
-            # If profit was stable, use inventory as a tie-breaker
-            profit_stable_mask = (profit == prev_profit) & normal_mask
-            ticks_of_sales_to_hold = self.config['target_inventory_production_ticks_factor']
-            target_inv = average_sales * ticks_of_sales_to_hold
-            
-            inv_increase_mask = (self.firms['inventory'] < target_inv) & profit_stable_mask
-            self.firms['price'][inv_increase_mask] *= (1 + adj_rate)
-            self.firms['last_price_direction'][inv_increase_mask] = 1
+            # Rule 1: Survival Mode for unprofitable firms (already implemented)
+            unprofitable_mask = (self.firms['profit_last_tick'] < 0) & normal_mask
+            self.firms['price'][unprofitable_mask] *= (1 - adj_rate)
+            self.firms['last_price_direction'][unprofitable_mask] = -1
 
-            inv_decrease_mask = (self.firms['inventory'] > target_inv) & profit_stable_mask
-            self.firms['price'][inv_decrease_mask] *= (1 - adj_rate)
-            self.firms['last_price_direction'][inv_decrease_mask] = -1
+            # For profitable firms, pricing is now based on inventory management.
+            profitable_mask = ~unprofitable_mask & normal_mask
+            if np.any(profitable_mask):
+                # Calculate target inventory based on smoothed sales history
+                ticks_to_hold = self.config['target_inventory_production_ticks_factor']
+                target_inventory = average_sales[profitable_mask] * ticks_to_hold
+                self.firms['target_inventory'][profitable_mask] = target_inventory.astype(int)
+
+                # Rule 2: Inventory Surplus -> Cut Price
+                upper_factor = self.config['inventory_upper_threshold_factor']
+                surplus_mask = (self.firms['inventory'] > self.firms['target_inventory'] * upper_factor) & profitable_mask
+                self.firms['price'][surplus_mask] *= (1 - adj_rate)
+                self.firms['last_price_direction'][surplus_mask] = -1
+                
+                # Rule 3: Inventory Shortage -> Raise Price
+                lower_factor = self.config['inventory_lower_threshold_factor']
+                shortage_mask = (self.firms['inventory'] < self.firms['target_inventory'] * lower_factor) & profitable_mask
+                self.firms['price'][shortage_mask] *= (1 + adj_rate)
+                self.firms['last_price_direction'][shortage_mask] = 1
 
             # 2. Adjust Workforce Target Based on Inventory, Sales, and Ambition
             # First, calculate the conservative target based on inventory needs using SMOOTHED sales data.
@@ -590,16 +623,21 @@ class Simulation:
                 # Reset counter to prevent continuous expansion.
                 self.firms['ticks_of_stable_profit'][ambitious_mask] = 0
 
-            # --- PROFITABILITY GATEKEEPER ---
-            # An unprofitable firm cannot hire. It can only maintain or downsize.
+            # --- PROFITABILITY GATEKEEPER (STRENGTHENED) ---
+            # A firm cannot expand its workforce if it is unprofitable. This prevents
+            # reckless hiring while the firm is losing money.
             unprofitable_mask = (self.firms['profit_last_tick'] < 0) & normal_mask
             if np.any(unprofitable_mask):
                 current_workers = self.firms['num_workers'][unprofitable_mask]
-                # Cap the target at the current number of workers.
-                new_target_workers[unprofitable_mask] = np.minimum(new_target_workers[unprofitable_mask], current_workers)
+                # For any firm that was unprofitable, cap its target at its current workforce size.
+                new_target_workers[unprofitable_mask] = np.minimum(
+                    new_target_workers[unprofitable_mask], 
+                    current_workers
+                )
             
-            # --- BUDGETARY CONSTRAINT ---
+            # --- BUDGETARY CONSTRAINT (FINAL VALIDATION) ---
             # A firm cannot set a target that requires hiring more workers than it can afford.
+            # This is the final gatekeeper that enforces financial prudence.
             budget_rate = self.config['expansion_budget_rate']
             capital_for_expansion = self.firms['balance'][normal_mask] * budget_rate
             
@@ -612,13 +650,15 @@ class Simulation:
             # Avoid division by zero if cost is somehow zero
             cost_per_new_hire[cost_per_new_hire == 0] = 1 
             
+            # Calculate how many new hires the firm can afford from its expansion budget
             affordable_new_hires = (capital_for_expansion / cost_per_new_hire).astype(int)
             
             current_workers = self.firms['num_workers'][normal_mask]
             max_affordable_target = current_workers + affordable_new_hires
             
-            # Cap the final target at what is affordable
-            final_target = np.minimum(new_target_workers[normal_mask], max_affordable_target)
+            # The final target is the minimum of what the firm desires (from sales/inventory)
+            # and what it can actually afford.
+            final_target = np.minimum(new_target_workers, max_affordable_target)
 
             self.firms['target_num_workers'][normal_mask] = np.maximum(self.config['min_target_workers'], final_target)
 
@@ -634,11 +674,10 @@ class Simulation:
         price_floor_mask = (self.firms['price'] < marginal_cost) & active_mask
         if np.any(price_floor_mask):
             self.firms['price'][price_floor_mask] = marginal_cost[price_floor_mask]
-            for firm_id in np.where(price_floor_mask)[0]:
-                logger.info(
-                    "FIRM STRATEGY: Firm %d price adjustment from %.2f blocked by production cost floor of %.2f.",
-                    firm_id, old_prices_for_floor_check[firm_id], marginal_cost[firm_id]
-                )
+            # Instead of logging every hit, we aggregate this event.
+            # The count will be displayed in the main 5-tick summary.
+            num_hits = np.sum(price_floor_mask)
+            self.tick_events['price_floor_hits'] += num_hits
 
         # --- Step 4: Update Memory for Next Tick ---
         self.firms['previous_profit'] = self.firms['profit_last_tick']

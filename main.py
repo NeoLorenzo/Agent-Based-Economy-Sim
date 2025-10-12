@@ -80,19 +80,55 @@ def main():
                         summary.get('total_wages_paid', 0.0),
                         summary.get('unemployment_rate', 0.0)
                     )
+
+                    # --- NEW: Household & Wealth Distribution Metrics ---
+                    mean_hh_balance = np.mean(sim.households['balance'])
+                    median_hh_balance = np.median(sim.households['balance'])
+                    total_firm_capital = np.sum(sim.firms['balance'])
+                    total_money = sim.config['M0'] + (sim.config['firm_initial_capital'] * sim.config['N_F'])
+                    firm_wealth_share = (total_firm_capital / total_money) * 100 if total_money > 0 else 0
+                    
+                    logger.info(
+                        "  Wealth: HH Mean Bal: $%7.2f | HH Median Bal: $%7.2f | Firm Wealth Share: %.1f%%",
+                        mean_hh_balance,
+                        median_hh_balance,
+                        firm_wealth_share
+                    )
+
+                    # --- NEW: Labor Market Metrics ---
+                    unfilled_positions = np.sum(np.maximum(0, sim.firms['target_num_workers'] - sim.firms['num_workers']))
+                    logger.info(
+                        "  Labor: Unfilled Positions: %d",
+                        unfilled_positions
+                    )
+
                     # Log the detailed state of each active firm
+                    logger.info("  Firms:")
+                    # Pre-calculate constants for the loop
+                    raw_material_cost = sim.config['raw_material_cost_per_unit']
+                    prod_per_worker = sim.config['production_per_worker']
+                    
                     for i, firm in enumerate(sim.firms):
                         if not firm['is_bankrupt']:
+                            # Calculate metrics specific to this firm
+                            marginal_cost = raw_material_cost + (firm['wage_rate'] / prod_per_worker) if prod_per_worker > 0 else raw_material_cost
+                            average_sales = np.mean(sim.firm_sales_history[i])
+                            
                             logger.info(
-                                "  Firm %d: Bal: %8.2f | Inv: %5d | Price: %5.2f | Workers: %3d/%3d | Profit: %8.2f",
+                                "    - Firm %d: Bal: %9.2f | Inv: %5d | Price: %5.2f (MC: %4.2f) | Workers: %3d/%3d | Profit: %9.2f | Wage: %5.2f | Crisis Ticks: %2d | Avg Sales: %5.1f",
                                 i,
                                 firm['balance'],
                                 firm['inventory'],
                                 firm['price'],
+                                marginal_cost,
                                 firm['num_workers'],
                                 firm['target_num_workers'],
-                                firm['profit_last_tick']
+                                firm['profit_last_tick'],
+                                firm['wage_rate'],
+                                firm['ticks_of_falling_profit'],
+                                average_sales
                             )
+
                     # Log the aggregated production stats over the last 5 ticks
                     logger.info(
                         "  Production (last 5 ticks): %d units | Total Material Cost (re-distributed): $%.2f",
