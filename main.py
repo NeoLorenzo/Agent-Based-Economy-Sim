@@ -9,10 +9,10 @@ import logging
 import collections
 import os
 import matplotlib.pyplot as plt
-from simulation import Simulation
-import constants as C
-import logging_setup
-import visualization as viz # Import the new module
+from src.simulation import Simulation
+from src import constants as C
+from src import logging_setup
+from src import visualization as viz # Import the new module
 
 #======================================
 # MAIN APPLICATION

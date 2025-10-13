@@ -3,7 +3,7 @@
 import pygame
 import pygame.gfxdraw
 import math
-import constants as C
+from src import constants as C
 import logging
 import matplotlib.pyplot as plt
 
