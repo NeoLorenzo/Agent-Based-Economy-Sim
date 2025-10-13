@@ -36,9 +36,46 @@ def main():
     np.random.seed(master_seed)
     logger.info("RNGs seeded with master seed: %d", master_seed)
     
+def _format_summary_string(counter):
+    """Helper function to format a counter into a compact string like 'N(4) C(1)'."""
+    if not counter:
+        return ""
+    # Abbreviate for conciseness
+    abbreviations = {'Normal': 'N', 'Crisis': 'C', 'InvCrisis': 'I'}
+    
+    # Sort by count descending to show the most dominant state first
+    sorted_items = sorted(counter.items(), key=lambda item: item[1], reverse=True)
+    
+    parts = []
+    for item, count in sorted_items:
+        abbr = abbreviations.get(item, item) # Use abbreviation if available
+        parts.append(f"{abbr}({count})")
+    return " ".join(parts)
+
+def main():
+    context_filter, run_dir, buffering_handler = logging_setup.setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Application starting...")
+    
+    pygame.init()
+    screen = pygame.display.set_mode((C.SCREEN_WIDTH, C.SCREEN_HEIGHT))
+    pygame.display.set_caption("Agent-Based Economy Simulation")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(C.FONT_FACE, C.FONT_SIZE)
+    
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+
+    master_seed = config['seed']
+    random.seed(master_seed)
+    np.random.seed(master_seed)
+    logger.info("RNGs seeded with master seed: %d", master_seed)
+    
     sim = Simulation(config)
     event_log_aggregator = collections.Counter()
     summary_aggregator = collections.Counter()
+    ai_mode_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
+    price_driver_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
     
     inventory_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     price_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
@@ -68,6 +105,11 @@ def main():
                 transactions, summary, tick_events = sim.run_one_tick(tick_counter)
                 event_log_aggregator.update(tick_events)
                 summary_aggregator.update(summary)
+
+                # Aggregate AI state data every tick
+                for i in range(config['N_F']):
+                    ai_mode_aggregator[i][sim.firms['ai_mode'][i]] += 1
+                    price_driver_aggregator[i][sim.firms['price_driver'][i]] += 1
                 
                 # Log a detailed summary every 5 ticks.
                 if tick_counter > 0 and tick_counter % 5 == 0:
@@ -97,7 +139,9 @@ def main():
                     )
 
                     # --- NEW: Labor Market Metrics ---
-                    unfilled_positions = np.sum(np.maximum(0, sim.firms['target_num_workers'] - sim.firms['num_workers']))
+                    total_target_workers = sim.firms['target_prod_workers'] + sim.firms['target_logi_workers'] + sim.firms['target_sales_workers']
+                    current_total_workers = sim.firms['num_prod_workers'] + sim.firms['num_logi_workers'] + sim.firms['num_sales_workers']
+                    unfilled_positions = np.sum(np.maximum(0, total_target_workers - current_total_workers))
                     logger.info(
                         "  Labor: Unfilled Positions: %d",
                         unfilled_positions
@@ -112,21 +156,31 @@ def main():
                     for i, firm in enumerate(sim.firms):
                         if not firm['is_bankrupt']:
                             # Calculate metrics specific to this firm
-                            marginal_cost = raw_material_cost + (firm['wage_rate'] / prod_per_worker) if prod_per_worker > 0 else raw_material_cost
+                            total_cost_last_tick = firm['production_cost_last_tick'] + firm['wages_paid_last_tick']
+                            units_sold_last_tick = firm['units_sold_last_tick']
+                            fallback_cost = raw_material_cost + (firm['wage_rate'] / prod_per_worker) if prod_per_worker > 0 else raw_material_cost
+                            unit_cost = total_cost_last_tick / units_sold_last_tick if units_sold_last_tick > 0 else fallback_cost
                             average_sales = np.mean(sim.firm_sales_history[i])
                             
+                            total_workers = firm['num_prod_workers'] + firm['num_logi_workers'] + firm['num_sales_workers']
+                            total_target = firm['target_prod_workers'] + firm['target_logi_workers'] + firm['target_sales_workers']
+                            worker_str = f"{total_workers}/{total_target} ({firm['num_prod_workers']}/{firm['num_logi_workers']}/{firm['num_sales_workers']})"
+
+                            # Format the new AI summary string
+                            mode_str = _format_summary_string(ai_mode_aggregator[i])
+                            driver_str = _format_summary_string(price_driver_aggregator[i])
+                            ai_summary_str = f"{mode_str} [{driver_str}]"
+
                             logger.info(
-                                "    - Firm %d: Bal: %9.2f | Inv: %5d | Price: %5.2f (MC: %4.2f) | Workers: %3d/%3d | Profit: %9.2f | Wage: %5.2f | Crisis Ticks: %2d | Avg Sales: %5.1f",
+                                "    - Firm %d: Bal: %9.2f | Inv: %5d | Price: %5.2f (UC: %4.2f) | Workers: %-15s | Profit: %9.2f | AI: %-20s | Avg Sales: %5.1f",
                                 i,
                                 firm['balance'],
                                 firm['inventory'],
                                 firm['price'],
-                                marginal_cost,
-                                firm['num_workers'],
-                                firm['target_num_workers'],
+                                unit_cost,
+                                worker_str,
                                 firm['profit_last_tick'],
-                                firm['wage_rate'],
-                                firm['ticks_of_falling_profit'],
+                                ai_summary_str,
                                 average_sales
                             )
 
@@ -143,6 +197,10 @@ def main():
                         event_str = " | ".join(f"{key.replace('_', ' ').title()}: {val}" for key, val in sorted(event_log_aggregator.items()))
                         logger.info("  Events (last 5 ticks): %s", event_str)
                         event_log_aggregator.clear()
+                    
+                    # Reset AI aggregators for the next window
+                    ai_mode_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
+                    price_driver_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
 
                 inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data = sim.update_and_get_firm_data_for_render()
                 

@@ -32,7 +32,8 @@ def update(sim, transactions, summary):
     revenue_last_tick = sim.firms['revenue_this_tick'].copy()
     sim.firms['revenue_this_tick'][:] = 0
     
-    total_payout = sim.firms['num_workers'] * sim.firms['wage_rate']
+    total_workers = sim.firms['num_prod_workers'] + sim.firms['num_logi_workers'] + sim.firms['num_sales_workers']
+    total_payout = total_workers * sim.firms['wage_rate']
     sim.firms['wages_paid_last_tick'] = total_payout
     
     # --- Profit Calculation ---
@@ -57,7 +58,9 @@ def update(sim, transactions, summary):
         # Liquidate assets and reset state
         sim.firms['balance'][firm_id] = 0
         sim.firms['inventory'][firm_id] = 0
-        sim.firms['num_workers'][firm_id] = 0
+        sim.firms['num_prod_workers'][firm_id] = 0
+        sim.firms['num_logi_workers'][firm_id] = 0
+        sim.firms['num_sales_workers'][firm_id] = 0
         sim.firms['debt'][firm_id] = 0 # Debt is written off
         total_payout[firm_id] = 0 # Cannot pay wages
 
@@ -65,7 +68,7 @@ def update(sim, transactions, summary):
     solvent_mask = ~bankrupt_mask
     sim.firms['balance'][solvent_mask] -= total_payout[solvent_mask]
     
-    num_workers = sim.firms['num_workers']
+    num_workers = sim.firms['num_prod_workers'] + sim.firms['num_logi_workers'] + sim.firms['num_sales_workers']
     wage_per_worker = np.divide(total_payout, num_workers, out=np.zeros_like(total_payout), where=num_workers!=0)
     
     employed_mask = sim.households['employer_id'] != -1

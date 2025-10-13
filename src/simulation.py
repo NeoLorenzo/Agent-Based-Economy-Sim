@@ -101,8 +101,10 @@ class Simulation:
             ('wages_paid_last_tick', 'f8'), ('profit_last_tick', 'f8'),
             ('previous_profit', 'f8'), ('ticks_of_falling_profit', 'i4'),
             ('ticks_of_stable_profit', 'i4'), ('last_price_direction', 'i4'),
-            ('num_workers', 'i4'), ('target_num_workers', 'i4'),
-            ('failed_to_hire_last_tick', '?'), ('is_bankrupt', '?')
+            ('num_prod_workers', 'i4'), ('num_logi_workers', 'i4'), ('num_sales_workers', 'i4'),
+            ('target_prod_workers', 'i4'), ('target_logi_workers', 'i4'), ('target_sales_workers', 'i4'),
+            ('failed_to_hire_last_tick', '?'), ('is_bankrupt', '?'),
+            ('ai_mode', 'U10'), ('price_driver', 'U2')
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
@@ -111,12 +113,13 @@ class Simulation:
         self.firms['wage_rate'] = self.config['wage_rate']
         self.firms['last_price_direction'] = 1
         
-        household_dtype = [('balance', 'f8'), ('size', 'i4'), ('employer_id', 'i4')]
+        household_dtype = [('balance', 'f8'), ('size', 'i4'), ('employer_id', 'i4'), ('job_role', 'i4')]
         self.households = np.zeros(self.config['N_H'], dtype=household_dtype)
 
         self.households['balance'] = self.config['M0'] / self.config['N_H']
         self.households['size'] = self.config['household_size']
         self.households['employer_id'] = -1
+        self.households['job_role'] = 0 # 0: Unemployed
         
         diffs = self.firm_pos_array[:, np.newaxis, :] - self.household_pos_array[np.newaxis, :, :]
         dist_sq = np.sum(diffs**2, axis=2)
@@ -125,10 +128,11 @@ class Simulation:
         for firm_id, owner_id in enumerate(owner_ids):
             self.firms['owner_id'][firm_id] = owner_id
             self.households['employer_id'][owner_id] = firm_id
+            self.households['job_role'][owner_id] = 1 # 1: Production
             self.firm_owner_map[firm_id] = owner_id
 
-        self.firms['num_workers'] = 1
-        self.firms['target_num_workers'] = 1
+        self.firms['num_prod_workers'] = 1
+        self.firms['target_prod_workers'] = 1
         
         bank_dtype = [('balance', 'f8')]
         self.banks = np.zeros(self.config.get('N_B', 0), dtype=bank_dtype)
@@ -152,7 +156,8 @@ class Simulation:
             self._inventory_history[i].append(self.firms['inventory'][i])
             self._price_history[i].append(self.firms['price'][i])
             self._capital_history[i].append(self.firms['balance'][i])
-            self._employee_history[i].append(self.firms['num_workers'][i])
+            total_workers = self.firms['num_prod_workers'][i] + self.firms['num_logi_workers'][i] + self.firms['num_sales_workers'][i]
+            self._employee_history[i].append(total_workers)
             self._wage_history[i].append(self.firms['wage_rate'][i])
 
         return self._inventory_history, self._price_history, self._capital_history, self._employee_history

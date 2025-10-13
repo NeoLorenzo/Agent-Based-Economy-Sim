@@ -28,7 +28,7 @@ def update(sim, summary):
 
     # Production is a function of the number of workers
     production_per_worker = sim.config['production_per_worker']
-    produced_quantity = sim.firms['num_workers'] * production_per_worker
+    produced_quantity = sim.firms['num_prod_workers'] * production_per_worker
     
     # Production has a cost (raw materials)
     material_cost_per_unit = sim.config['raw_material_cost_per_unit']
