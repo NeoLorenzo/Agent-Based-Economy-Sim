@@ -24,28 +24,32 @@ def _calculate_health_scores(sim, active_mask):
     firms = sim.firms[active_mask]
     config = sim.config.get('unified_strategy_ai', {}).get('health_check_params', {})
 
-    # --- 1. Inventory Health ---
+    # --- 1. Inventory Health --- (Recalculated with correct linear mapping)
     healthy_ratio = config.get('inventory_ratio_healthy', 1.0)
     crit_surplus = config.get('inventory_ratio_critical_surplus', 5.0)
     crit_shortage = config.get('inventory_ratio_critical_shortage', 0.0)
-    
-    # Safely calculate inventory ratio
-    target_inv = firms['target_inventory']
-    inv_ratio = np.divide(firms['inventory'], target_inv, out=np.full_like(target_inv, healthy_ratio, dtype=float), where=target_inv!=0)
 
-    # Normalize to score
-    inv_health = np.zeros_like(inv_ratio)
+    target_inv = firms['target_inventory']
+    inv_ratio = np.divide(firms['inventory'], target_inv, out=np.full_like(target_inv, crit_shortage, dtype=float), where=target_inv!=0)
+
+    inv_health = np.full_like(inv_ratio, 1.0) # Default to healthy
     surplus_mask = inv_ratio > healthy_ratio
     shortage_mask = inv_ratio < healthy_ratio
-    
-    # Score for surplus
-    denominator = crit_surplus - healthy_ratio
-    inv_health[surplus_mask] = 1.0 - (inv_ratio[surplus_mask] - healthy_ratio) / denominator if denominator > 0 else 0
-    
-    # Score for shortage
-    denominator = healthy_ratio - crit_shortage
-    inv_health[shortage_mask] = 1.0 - (healthy_ratio - inv_ratio[shortage_mask]) / denominator if denominator > 0 else 0
-    
+
+    # Score for surplus (Maps from healthy_ratio -> crit_surplus to a score of 1.0 -> -1.0)
+    if np.any(surplus_mask):
+        denominator = healthy_ratio - crit_surplus
+        slope = 2.0 / denominator if denominator != 0 else 0
+        intercept = 1.0 - slope * healthy_ratio
+        inv_health[surplus_mask] = slope * inv_ratio[surplus_mask] + intercept
+
+    # Score for shortage (Maps from healthy_ratio -> crit_shortage to a score of 1.0 -> -1.0)
+    if np.any(shortage_mask):
+        denominator = healthy_ratio - crit_shortage
+        slope = 2.0 / denominator if denominator != 0 else 0
+        intercept = -1.0 - slope * crit_shortage
+        inv_health[shortage_mask] = slope * inv_ratio[shortage_mask] + intercept
+
     sim.firms['health_inventory'][active_mask] = np.clip(inv_health, -1.0, 1.0)
 
     # --- 2. Sales & 3. Profit Health (Trend-Based) ---
@@ -222,14 +226,36 @@ def update(sim, summary):
     prod_per_worker = sim.config['production_per_worker']
     fallback_cost = raw_material_cost + (sim.firms['wage_rate'] / prod_per_worker)
 
-    # Calculate the true unit cost, using the fallback if no units were sold.
+    # --- Final Price Floor Enforcement ---
+    # A firm is forbidden from selling a product for less than its true unit cost.
+    old_prices_for_floor_check = sim.firms['price'].copy()
+
+    total_cost_last_tick = sim.firms['production_cost_last_tick'] + sim.firms['wages_paid_last_tick']
+    units_sold_last_tick = sim.firms['units_sold_last_tick']
+
+    raw_material_cost = sim.config['raw_material_cost_per_unit']
+    prod_per_worker = sim.config['production_per_worker']
+    fallback_cost = raw_material_cost + (sim.firms['wage_rate'] / prod_per_worker)
+
+    # --- CORRECTED LOGIC ---
+    # Create a pristine copy of the fallback cost for our safety check.
+    pristine_fallback = fallback_cost.copy()
+
+    # Calculate the unit cost. Note: Using `out=fallback_cost` modifies it in place.
     unit_cost = np.divide(
         total_cost_last_tick, 
         units_sold_last_tick, 
         out=fallback_cost, 
         where=units_sold_last_tick > 0
     )
-    
+
+    # Robustness check: If unit cost explodes due to low sales, cap it by comparing
+    # against the PRISTINE fallback cost, not the modified one.
+    cost_discrepancy_threshold = 3.0
+    unrealistically_high_cost_mask = (unit_cost > pristine_fallback * cost_discrepancy_threshold)
+    if np.any(unrealistically_high_cost_mask):
+        unit_cost[unrealistically_high_cost_mask] = pristine_fallback[unrealistically_high_cost_mask]
+
     price_floor_mask = (sim.firms['price'] < unit_cost) & active_mask
     if np.any(price_floor_mask):
         sim.firms['price'][price_floor_mask] = unit_cost[price_floor_mask]

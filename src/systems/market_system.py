@@ -49,7 +49,28 @@ def update(sim, transactions, summary):
         chosen_firm_ids = active_firm_ids[chosen_firm_local_indices]
     else:
         chosen_firm_ids = np.random.choice(active_firm_ids, size=sim.config['N_H'])
-    
+
+    # --- NEW: Model Customer Loyalty / Inertia ---
+    loyalty_chance = sim.config.get('customer_loyalty_chance', 0.0)
+    if loyalty_chance > 0:
+        # Determine which households will be loyal this tick
+        is_loyal_roll = np.random.rand(sim.config['N_H']) < loyalty_chance
+        
+        # Get the last firm they shopped at
+        last_firm_ids = sim.households['last_shopping_firm_id']
+        
+        # Check if their last firm is still active
+        is_last_firm_active = ~np.isin(last_firm_ids, np.where(sim.firms['is_bankrupt'])[0])
+        
+        # Final mask: they are loyal AND their last firm is still in business
+        final_loyalty_mask = is_loyal_roll & is_last_firm_active
+        
+        # For those households, override their choice with their previous firm
+        chosen_firm_ids[final_loyalty_mask] = last_firm_ids[final_loyalty_mask]
+
+    # Update the memory for next tick's loyalty check
+    sim.households['last_shopping_firm_id'] = chosen_firm_ids
+
     requested_qty = sim.households['size'] * sim.config['food_per_person']
     firm_prices = sim.firms['price'][chosen_firm_ids]
     max_affordable_qty = (sim.households['balance'] / firm_prices).astype(int)

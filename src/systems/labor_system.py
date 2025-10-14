@@ -134,8 +134,15 @@ def update(sim, total_payout, summary):
 
     # --- Step 4: Hiring Logic ---
     sim.firms['failed_to_hire_last_tick'][:] = False
-    unemployed_hh_indices = np.where(sim.households['employer_id'] == -1)[0]
-    
+    all_unemployed_hh = np.where(sim.households['employer_id'] == -1)[0]
+
+    # --- NEW: Introduce Labor Market Friction ---
+    # A firm cannot instantly interview and hire the entire unemployed population.
+    # This models search costs and matching friction.
+    hiring_limit_rate = sim.config.get('max_hires_per_tick_rate', 1.0)
+    num_hirable = int(np.ceil(len(all_unemployed_hh) * hiring_limit_rate))
+    unemployed_hh_indices = np.random.choice(all_unemployed_hh, size=num_hirable, replace=False)
+
     if len(unemployed_hh_indices) > 0:
         prod_deficit_mask = sim.firms['num_prod_workers'] < sim.firms['target_prod_workers']
         logi_deficit_mask = sim.firms['num_logi_workers'] < sim.firms['target_logi_workers']

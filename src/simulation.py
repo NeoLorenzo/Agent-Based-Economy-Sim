@@ -119,7 +119,7 @@ class Simulation:
         self.firms['price'] = self.config['p']
         self.firms['wage_rate'] = self.config['wage_rate']
         
-        household_dtype = [('balance', 'f8'), ('size', 'i4'), ('employer_id', 'i4'), ('job_role', 'i4')]
+        household_dtype = [('balance', 'f8'), ('size', 'i4'), ('employer_id', 'i4'), ('job_role', 'i4'), ('last_shopping_firm_id', 'i4')]
         self.households = np.zeros(self.config['N_H'], dtype=household_dtype)
 
         self.households['balance'] = self.config['M0'] / self.config['N_H']

@@ -36,10 +36,12 @@
   "target_inventory_production_ticks_factor": 4,
   "firm_initial_capital": 5000,
   "M0": 40000,
+  "max_hires_per_tick_rate": 0.05,
   "seed": 42,
   "ticks_per_second": 5,
   "enable_proximity_choice": true,
   "shopping_firms_to_consider": 3,
+  "customer_loyalty_chance": 0.05,
   "firm_layoff_capital_threshold_factor": 2.0,
   "firm_hiring_revenue_threshold_factor": 1.5,
   "dividend_payout_rate": 0.01,
@@ -60,13 +62,13 @@
       "price_impulse_weight_inventory": 0.5,
       "price_impulse_weight_sales": 0.5,
       "price_impulse_weight_profit": 0.1,
-      "production_impulse_weight_inventory": -0.5,
+      "production_impulse_weight_inventory": -0.2,
       "production_impulse_weight_sales": 0.3,
       "production_impulse_weight_profit": 0.2
     },
     "action_synthesis_params": {
-      "max_price_adjustment_factor": 0.10,
-      "max_workforce_adjustment_factor": 0.25
+      "max_price_adjustment_factor": 0.05,
+      "max_workforce_adjustment_factor": 0.10
     }
   },
   "logging": {
@@ -75,13 +77,16 @@
     "formatters": {
       "detailed": {
         "format": "%(asctime)s - %(levelname)-8s - %(name)-15s - Tick:%(tick)-5d - %(message)s"
+      },
+      "console_simple": {
+        "format": "%(message)s"
       }
     },
     "handlers": {
       "console": {
         "class": "logging.StreamHandler",
         "level": "INFO",
-        "formatter": "detailed",
+        "formatter": "console_simple",
         "stream": "ext://sys.stdout"
       },
       "file": {
