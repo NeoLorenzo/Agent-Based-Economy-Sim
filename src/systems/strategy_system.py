@@ -14,268 +14,199 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _calculate_health_scores(sim, active_mask):
+    """
+    Performs a modular health check on each core business function for all active firms.
+    Calculates and stores a health score from -1.0 (critical) to +1.0 (excellent)
+    for Inventory, Sales, Profit, and Capital.
+    """
+    # Convenience references
+    firms = sim.firms[active_mask]
+    config = sim.config.get('unified_strategy_ai', {}).get('health_check_params', {})
+
+    # --- 1. Inventory Health ---
+    healthy_ratio = config.get('inventory_ratio_healthy', 1.0)
+    crit_surplus = config.get('inventory_ratio_critical_surplus', 5.0)
+    crit_shortage = config.get('inventory_ratio_critical_shortage', 0.0)
+    
+    # Safely calculate inventory ratio
+    target_inv = firms['target_inventory']
+    inv_ratio = np.divide(firms['inventory'], target_inv, out=np.full_like(target_inv, healthy_ratio, dtype=float), where=target_inv!=0)
+
+    # Normalize to score
+    inv_health = np.zeros_like(inv_ratio)
+    surplus_mask = inv_ratio > healthy_ratio
+    shortage_mask = inv_ratio < healthy_ratio
+    
+    # Score for surplus
+    denominator = crit_surplus - healthy_ratio
+    inv_health[surplus_mask] = 1.0 - (inv_ratio[surplus_mask] - healthy_ratio) / denominator if denominator > 0 else 0
+    
+    # Score for shortage
+    denominator = healthy_ratio - crit_shortage
+    inv_health[shortage_mask] = 1.0 - (healthy_ratio - inv_ratio[shortage_mask]) / denominator if denominator > 0 else 0
+    
+    sim.firms['health_inventory'][active_mask] = np.clip(inv_health, -1.0, 1.0)
+
+    # --- 2. Sales & 3. Profit Health (Trend-Based) ---
+    # Initialize EWMA on first run with the current value to prevent starting at 0
+    if sim._current_tick == 0:
+        sim.firm_sales_ewma_short[active_mask] = firms['units_sold_last_tick']
+        sim.firm_sales_ewma_long[active_mask] = firms['units_sold_last_tick']
+        sim.firm_profit_ewma_short[active_mask] = firms['profit_last_tick']
+        sim.firm_profit_ewma_long[active_mask] = firms['profit_last_tick']
+
+    # Get EWMA alphas from config
+    alpha_sales_short = 2 / (config.get('sales_trend_ema_short_ticks', 3) + 1)
+    alpha_sales_long = 2 / (config.get('sales_trend_ema_long_ticks', 10) + 1)
+    alpha_profit_short = 2 / (config.get('profit_trend_ema_short_ticks', 3) + 1)
+    alpha_profit_long = 2 / (config.get('profit_trend_ema_long_ticks', 10) + 1)
+    
+    # Update EWMAs for active firms
+    sales_now = firms['units_sold_last_tick']
+    profit_now = firms['profit_last_tick']
+    sim.firm_sales_ewma_short[active_mask] = alpha_sales_short * sales_now + (1 - alpha_sales_short) * sim.firm_sales_ewma_short[active_mask]
+    sim.firm_sales_ewma_long[active_mask] = alpha_sales_long * sales_now + (1 - alpha_sales_long) * sim.firm_sales_ewma_long[active_mask]
+    sim.firm_profit_ewma_short[active_mask] = alpha_profit_short * profit_now + (1 - alpha_profit_short) * sim.firm_profit_ewma_short[active_mask]
+    sim.firm_profit_ewma_long[active_mask] = alpha_profit_long * profit_now + (1 - alpha_profit_long) * sim.firm_profit_ewma_long[active_mask]
+
+    # Calculate trend ratios
+    sales_ratio = np.divide(sim.firm_sales_ewma_short[active_mask], sim.firm_sales_ewma_long[active_mask], out=np.ones_like(sales_now, dtype=float), where=sim.firm_sales_ewma_long[active_mask]!=0)
+    profit_ratio = np.divide(sim.firm_profit_ewma_short[active_mask], sim.firm_profit_ewma_long[active_mask], out=np.ones_like(profit_now, dtype=float), where=sim.firm_profit_ewma_long[active_mask]!=0)
+    
+    # Normalize with tanh to get a score from -1 to 1
+    scaler = config.get('trend_ratio_tanh_scaler', 2.0)
+    sim.firms['health_sales'][active_mask] = np.tanh((sales_ratio - 1.0) * scaler)
+    sim.firms['health_profit'][active_mask] = np.tanh((profit_ratio - 1.0) * scaler)
+
+    # --- 4. Capital Health ---
+    healthy_ticks = config.get('capital_coverage_healthy_ticks', 20.0)
+    critical_ticks = config.get('capital_coverage_critical_ticks', 2.0)
+    
+    wages_paid = firms['wages_paid_last_tick']
+    coverage = np.divide(firms['balance'], wages_paid, out=np.full_like(wages_paid, healthy_ticks, dtype=float), where=wages_paid!=0)
+    
+    # Normalize 0-1, then scale to -1 to 1
+    denominator = healthy_ticks - critical_ticks
+    capital_health = (coverage - critical_ticks) / denominator if denominator > 0 else 0.0
+    sim.firms['health_capital'][active_mask] = np.clip((capital_health * 2) - 1, -1.0, 1.0)
+
+    # --- Validation Logging ---
+    for firm_id in np.where(active_mask)[0]:
+        logger.debug(
+            "Firm %d Health Scores | Inv: %.2f, Sales: %.2f, Profit: %.2f, Capital: %.2f",
+            firm_id,
+            sim.firms['health_inventory'][firm_id],
+            sim.firms['health_sales'][firm_id],
+            sim.firms['health_profit'][firm_id],
+            sim.firms['health_capital'][firm_id]
+        )
+
+def _calculate_unified_strategy(sim, active_mask):
+    """
+    Translates firm health scores into unified strategic impulses for price and production.
+    Returns the proposed strategic actions for logging and eventual application.
+    """
+    # Convenience references
+    firms = sim.firms[active_mask]
+    config = sim.config.get('unified_strategy_ai', {})
+    impulse_weights = config.get('impulse_weight_params', {})
+    action_params = config.get('action_synthesis_params', {})
+
+    # --- 1. Synthesize Price Strategy ---
+    price_impulse_inv = firms['health_inventory'] * impulse_weights.get('price_impulse_weight_inventory', 0)
+    price_impulse_sales = firms['health_sales'] * impulse_weights.get('price_impulse_weight_sales', 0)
+    price_impulse_profit = firms['health_profit'] * impulse_weights.get('price_impulse_weight_profit', 0)
+
+    total_price_impulse = np.clip(
+        price_impulse_inv + price_impulse_sales + price_impulse_profit,
+        -1.0,
+        1.0
+    )
+
+    price_adjustment = total_price_impulse * action_params.get('max_price_adjustment_factor', 0.1)
+    proposed_new_price = firms['price'] * (1 + price_adjustment)
+
+    # --- 2. Synthesize Workforce Strategy ---
+    prod_impulse_inv = firms['health_inventory'] * impulse_weights.get('production_impulse_weight_inventory', 0)
+    prod_impulse_sales = firms['health_sales'] * impulse_weights.get('production_impulse_weight_sales', 0)
+    prod_impulse_profit = firms['health_profit'] * impulse_weights.get('production_impulse_weight_profit', 0)
+
+    total_production_impulse = np.clip(
+        prod_impulse_inv + prod_impulse_sales + prod_impulse_profit,
+        -1.0,
+        1.0
+    )
+    
+    base_ticks_factor = sim.config.get('target_inventory_production_ticks_factor', 4)
+    dynamic_ticks_factor = base_ticks_factor * (1 + total_production_impulse)
+
+    average_sales = np.mean(sim.firm_sales_history[active_mask], axis=1)
+    desired_inventory = average_sales * dynamic_ticks_factor
+    current_inventory = firms['inventory']
+    production_need = desired_inventory - current_inventory
+    
+    production_per_worker = sim.config.get('production_per_worker', 5)
+    proposed_target_prod_workers = np.ceil(np.maximum(0, production_need) / production_per_worker).astype(int)
+    
+    surplus_mask = (production_need <= 0)
+    proposed_target_prod_workers[surplus_mask] = sim.config.get('min_target_workers', 1)
+
+    logi_ratio = sim.config.get('logistics_to_production_ratio', 0.2)
+    sales_ratio = sim.config.get('sales_to_production_ratio', 0.1)
+    proposed_target_logi_workers = np.ceil(proposed_target_prod_workers * logi_ratio).astype(int)
+    proposed_target_sales_workers = np.ceil(proposed_target_prod_workers * sales_ratio).astype(int)
+
+    # --- Capital Veto ---
+    capital_veto_mask = firms['health_capital'] < -0.5
+    if np.any(capital_veto_mask):
+        current_total_workers = firms['num_prod_workers'] + firms['num_logi_workers'] + firms['num_sales_workers']
+        proposed_total_workers = proposed_target_prod_workers + proposed_target_logi_workers + proposed_target_sales_workers
+        
+        expansion_mask = proposed_total_workers > current_total_workers
+        final_veto_mask = capital_veto_mask & expansion_mask
+
+        proposed_target_prod_workers[final_veto_mask] = firms['num_prod_workers'][final_veto_mask]
+        proposed_target_logi_workers[final_veto_mask] = firms['num_logi_workers'][final_veto_mask]
+        proposed_target_sales_workers[final_veto_mask] = firms['num_sales_workers'][final_veto_mask]
+
+    # --- Package and Return Proposed Actions ---
+    proposals = {
+        'price': proposed_new_price,
+        'price_impulse': total_price_impulse,
+        'target_prod': proposed_target_prod_workers,
+        'target_logi': proposed_target_logi_workers,
+        'target_sales': proposed_target_sales_workers,
+        'prod_impulse': total_production_impulse
+    }
+    return proposals
+
 def update(sim, summary):
     """
     Firms make strategic decisions about price and production to maximize profit.
     
     Args:
-        sim: The simulation state object.
+        sim: The simulation state object
         summary: A dictionary to accumulate summary statistics for the tick.
     """
     logger.debug("Start Firm Adjustment Phase")
     active_mask = ~sim.firms['is_bankrupt']
     if not np.any(active_mask): return
 
-    # Set default states for the tick. These will be overwritten by specific logic.
-    sim.firms['ai_mode'][active_mask] = 'Normal'
-    sim.firms['price_driver'][active_mask] = '--'
+    # --- NEW: Calculate Unified Health Scores (Run in parallel with old AI for now) ---
+    _calculate_health_scores(sim, active_mask)
+    # --- NEW: Calculate proposed strategy from health scores ---
+    proposed_strategy = _calculate_unified_strategy(sim, active_mask)
+    # Store proposals on the sim object to be read by the main loop for logging
+    sim.proposed_strategy = proposed_strategy
 
-    # --- Step 1: Assess Profit Situation ---
-    profit = sim.firms['profit_last_tick']
-    prev_profit = sim.firms['previous_profit']
-    
-    profit_fell_mask = (profit < prev_profit) & active_mask
-    sim.firms['ticks_of_falling_profit'][profit_fell_mask] += 1
-    
-    profit_rose_mask = (profit >= prev_profit) & active_mask
-    sim.firms['ticks_of_falling_profit'][profit_rose_mask] = 0
-
-    # --- Step 2: Choose Mode (Exploration vs. Exploitation) ---
-    crisis_threshold = sim.config['profit_crisis_threshold']
-    crisis_mask = (sim.firms['ticks_of_falling_profit'] > crisis_threshold) & active_mask
-    normal_mask = ~crisis_mask & active_mask
-
-    # --- Step 3: Execute Logic Based on Mode ---
-    
-    # --- Mode A: CRISIS / EXPLORATION ---
-    if np.any(crisis_mask):
-        sim.tick_events['crisis_triggers'] += np.sum(crisis_mask)
-        for firm_id in np.where(crisis_mask)[0]:
-            # Set AI state for logging
-            sim.firms['ai_mode'][firm_id] = 'Crisis'
-            sim.firms['price_driver'][firm_id] = 'C!'
-
-            # 1. Drastic Price Cut
-            cut_rate = sim.config['crisis_price_cut_rate']
-            sim.firms['price'][firm_id] *= (1 - cut_rate)
-            sim.firms['last_price_direction'][firm_id] = -1 # Force downward exploration
-            
-            # 2. Rational Workforce Pivot: Halt Production, Focus on Sales & Logistics.
-            # Immediately halt production to stop accumulating more inventory.
-            sim.firms['target_prod_workers'][firm_id] = sim.config['min_target_workers']
-            
-            # Calculate logistics staff needed to manage the current inventory surplus.
-            logi_ratio = sim.config['crisis_logistics_per_1000_units']
-            logi_target = np.ceil(sim.firms['inventory'][firm_id] / 1000.0 * logi_ratio).astype(int)
-            sim.firms['target_logi_workers'][firm_id] = logi_target
-            
-            # Maintain a minimum sales force to try and sell off the inventory.
-            sim.firms['target_sales_workers'][firm_id] = sim.config['crisis_sales_staff_floor']
-
-            # 3. Reset Crisis Counter
-            sim.firms['ticks_of_falling_profit'][firm_id] = 0
-
-    # --- Mode B: NORMAL / EXPLOITATION ---
-    if np.any(normal_mask):
-        # --- NEW: Inventory Crisis Check (Overrides all other logic) ---
-        # If a firm has a massive inventory surplus, it must pivot to selling it off,
-        # regardless of its profitability or sales history.
-        inventory_crisis_factor = 5.0 # New hardcoded value; can be moved to config
-        inventory_crisis_mask = (sim.firms['inventory'] > sim.firms['target_inventory'] * inventory_crisis_factor) & normal_mask
-        
-        if np.any(inventory_crisis_mask):
-            # Get the global indices of firms in an inventory crisis
-            crisis_indices = np.where(inventory_crisis_mask)[0]
-            sim.tick_events['inventory_crisis_triggers'] += len(crisis_indices)
-            sim.firms['ai_mode'][crisis_indices] = 'InvCrisis'
-
-            # Halt production
-            sim.firms['target_prod_workers'][crisis_indices] = sim.config['min_target_workers']
-            
-            # Staff logistics based on inventory size
-            logi_ratio = sim.config['crisis_logistics_per_1000_units']
-            inventory_in_crisis = sim.firms['inventory'][crisis_indices]
-            logi_target = np.ceil(inventory_in_crisis / 1000.0 * logi_ratio).astype(int)
-            sim.firms['target_logi_workers'][crisis_indices] = logi_target
-            
-            # Maintain a sales floor
-            sim.firms['target_sales_workers'][crisis_indices] = sim.config['crisis_sales_staff_floor']
-
-            # Remove these firms from the normal processing mask for this tick
-            normal_mask[crisis_indices] = False
-
-        # --- Update Stability Counter ---
-        profitable_mask = (sim.firms['profit_last_tick'] > 0) & normal_mask
-        sim.firms['ticks_of_stable_profit'][profitable_mask] += 1
-        unprofitable_mask = (sim.firms['profit_last_tick'] <= 0) & normal_mask
-        sim.firms['ticks_of_stable_profit'][unprofitable_mask] = 0
-
-        # --- Wage Adjustment Logic (Unemployment-Driven) ---
-        # Wages are now set based on the unemployment rate, the most direct measure of
-        # labor supply and demand in the simulation.
-
-        # 1. Get the current state of the labor market.
-        unemployment_rate = summary.get('unemployment_rate', 0.0) / 100.0 # Convert to 0-1 scale
-        increase_threshold = sim.config.get('unemployment_threshold_for_increases', 0.05)
-        cut_threshold = sim.config.get('unemployment_threshold_for_cuts', 0.10)
-
-        # 2. Apply a single, coherent wage strategy based on the market state.
-        
-        # State 1: Tight Labor Market (Worker's Market) -> Increase Wages
-        # If unemployment is very low, firms must compete for scarce workers.
-        if unemployment_rate < increase_threshold:
-            increase_rate = sim.config['competitive_wage_increase_rate']
-            sim.firms['wage_rate'][normal_mask] *= (1 + increase_rate)
-            sim.tick_events['wage_increases'] += np.sum(normal_mask)
-        
-        # State 2: Slack Labor Market (Employer's Market) -> Decrease Wages
-        # If unemployment is high, firms have leverage to cut costs.
-        elif unemployment_rate > cut_threshold:
-            cut_rate = sim.config.get('wage_cut_rate', 0.01)
-            sim.firms['wage_rate'][normal_mask] *= (1 - cut_rate)
-            sim.tick_events['wage_cuts'] += np.sum(normal_mask)
-
-        # State 3: Balanced Market -> Hold Wages Steady (No action needed)
-        # If unemployment is in the stable range between the two thresholds.
-
-        # --- New Pricing Logic (Replaces profit-delta logic) ---
-        adj_rate = sim.config['price_adjustment_rate']
-        
-        # BUG FIX: Calculate average_sales here, outside the conditional block.
-        # It is needed for both pricing and workforce target calculations.
-        average_sales = np.mean(sim.firm_sales_history, axis=1)
-
-        # Rule 1: Survival Mode for unprofitable firms (already implemented)
-        unprofitable_mask = (sim.firms['profit_last_tick'] < 0) & normal_mask
-        sim.firms['price'][unprofitable_mask] *= (1 - adj_rate)
-        sim.firms['last_price_direction'][unprofitable_mask] = -1
-        sim.firms['price_driver'][unprofitable_mask] = 'P-'
-
-        # For profitable firms, pricing is now based on inventory management.
-        profitable_mask = ~unprofitable_mask & normal_mask
-        if np.any(profitable_mask):
-            # Calculate target inventory based on smoothed sales history
-            ticks_to_hold = sim.config['target_inventory_production_ticks_factor']
-            target_inventory = average_sales[profitable_mask] * ticks_to_hold
-            sim.firms['target_inventory'][profitable_mask] = target_inventory.astype(int)
-
-            # Rule 2: Inventory Surplus -> Cut Price
-            upper_factor = sim.config['inventory_upper_threshold_factor']
-            surplus_mask = (sim.firms['inventory'] > sim.firms['target_inventory'] * upper_factor) & profitable_mask
-            sim.firms['price'][surplus_mask] *= (1 - adj_rate)
-            sim.firms['last_price_direction'][surplus_mask] = -1
-            sim.firms['price_driver'][surplus_mask] = 'I-'
-            
-            # Rule 3: Inventory Shortage -> Raise Price
-            lower_factor = sim.config['inventory_lower_threshold_factor']
-            shortage_mask = (sim.firms['inventory'] < sim.firms['target_inventory'] * lower_factor) & profitable_mask
-            sim.firms['price'][shortage_mask] *= (1 + adj_rate)
-            sim.firms['last_price_direction'][shortage_mask] = 1
-            sim.firms['price_driver'][shortage_mask] = 'I+'
-
-        # 2. Adjust Workforce Target Based on Inventory, Sales, and Ambition
-        # This entire block now operates on data pre-filtered by `normal_mask` to ensure consistent array shapes.
-        
-        # First, calculate the conservative target for PRODUCTION workers based on inventory needs.
-        ticks_of_sales_to_hold = sim.config['target_inventory_production_ticks_factor']
-        desired_inventory = average_sales[normal_mask] * ticks_of_sales_to_hold
-        current_inventory = sim.firms['inventory'][normal_mask]
-        production_need = desired_inventory - current_inventory
-        
-        production_per_worker = sim.config['production_per_worker']
-        target_prod_workers = np.ceil(np.maximum(0, production_need) / production_per_worker).astype(int)
-        
-        # If inventory is in surplus, production target is minimum.
-        surplus_sub_mask = (production_need <= 0)
-        target_prod_workers[surplus_sub_mask] = sim.config['min_target_workers']
-
-        # --- AMBITION LOGIC ---
-        ambition_threshold = sim.config['ambition_threshold']
-        stable_profit_ticks_normal = sim.firms['ticks_of_stable_profit'][normal_mask]
-        ambitious_sub_mask = (stable_profit_ticks_normal > ambition_threshold)
-        
-        if np.any(ambitious_sub_mask):
-            ambitious_global_indices = np.where(normal_mask)[0][ambitious_sub_mask]
-            sim.tick_events['ambition_triggers'] += len(ambitious_global_indices)
-            
-            current_prod_workers_ambitious = sim.firms['num_prod_workers'][ambitious_global_indices]
-            expansion_targets = np.maximum(np.ceil(current_prod_workers_ambitious * 1.2).astype(int), current_prod_workers_ambitious + 1)
-            
-            target_prod_workers[ambitious_sub_mask] = expansion_targets
-            
-            for i, firm_id in enumerate(ambitious_global_indices):
-                logger.info(
-                    "FIRM STRATEGY: Firm %d is stable. Experimenting with expansion to %d production workers.",
-                    firm_id, expansion_targets[i]
-                )
-            sim.firms['ticks_of_stable_profit'][ambitious_global_indices] = 0
-
-        # Second, calculate support staff targets based on the production target and config ratios.
-        logi_ratio = sim.config['logistics_to_production_ratio']
-        sales_ratio = sim.config['sales_to_production_ratio']
-        target_logi_workers = np.ceil(target_prod_workers * logi_ratio).astype(int)
-        target_sales_workers = np.ceil(target_prod_workers * sales_ratio).astype(int)
-
-        # --- PROFITABILITY GATEKEEPER (STRENGTHENED) ---
-        # Unprofitable firms are not allowed to expand their total workforce.
-        profits_normal = sim.firms['profit_last_tick'][normal_mask]
-        unprofitable_sub_mask = (profits_normal < 0)
-        if np.any(unprofitable_sub_mask):
-            current_total_workers_unprofitable = (sim.firms['num_prod_workers'][normal_mask][unprofitable_sub_mask] +
-                                                  sim.firms['num_logi_workers'][normal_mask][unprofitable_sub_mask] +
-                                                  sim.firms['num_sales_workers'][normal_mask][unprofitable_sub_mask])
-            
-            ideal_total_target = (target_prod_workers[unprofitable_sub_mask] +
-                                  target_logi_workers[unprofitable_sub_mask] +
-                                  target_sales_workers[unprofitable_sub_mask])
-
-            # Scale down targets proportionally if the ideal total exceeds the current total.
-            needs_scaling_mask = ideal_total_target > current_total_workers_unprofitable
-            if np.any(needs_scaling_mask):
-                scalable_ideal_totals = ideal_total_target[needs_scaling_mask]
-                scalable_ideal_totals[scalable_ideal_totals == 0] = 1 # Avoid division by zero
-                scale_factor = current_total_workers_unprofitable[needs_scaling_mask] / scalable_ideal_totals
-                
-                # Create temporary views to apply scaling
-                prod_view = target_prod_workers[unprofitable_sub_mask]
-                logi_view = target_logi_workers[unprofitable_sub_mask]
-                sales_view = target_sales_workers[unprofitable_sub_mask]
-
-                prod_view[needs_scaling_mask] = (prod_view[needs_scaling_mask] * scale_factor).astype(int)
-                logi_view[needs_scaling_mask] = (logi_view[needs_scaling_mask] * scale_factor).astype(int)
-                sales_view[needs_scaling_mask] = (sales_view[needs_scaling_mask] * scale_factor).astype(int)
-
-        # --- BUDGETARY CONSTRAINT (FINAL VALIDATION) ---
-        budget_rate = sim.config['expansion_budget_rate']
-        capital_for_expansion = sim.firms['balance'][normal_mask] * budget_rate
-        
-        raw_material_cost = sim.config['raw_material_cost_per_unit']
-        cost_per_new_hire = sim.firms['wage_rate'][normal_mask] + (raw_material_cost * production_per_worker)
-        cost_per_new_hire[cost_per_new_hire == 0] = 1 
-        
-        affordable_new_hires = (capital_for_expansion / cost_per_new_hire).astype(int)
-        
-        current_workers_normal = (sim.firms['num_prod_workers'][normal_mask] +
-                                  sim.firms['num_logi_workers'][normal_mask] +
-                                  sim.firms['num_sales_workers'][normal_mask])
-        max_affordable_target = current_workers_normal + affordable_new_hires
-        
-        ideal_total_target = target_prod_workers + target_logi_workers + target_sales_workers
-        
-        needs_scaling_mask = ideal_total_target > max_affordable_target
-        if np.any(needs_scaling_mask):
-            scalable_ideal_totals = ideal_total_target[needs_scaling_mask]
-            scalable_ideal_totals[scalable_ideal_totals == 0] = 1
-            scale_factor = max_affordable_target[needs_scaling_mask] / scalable_ideal_totals
-            
-            target_prod_workers[needs_scaling_mask] = (target_prod_workers[needs_scaling_mask] * scale_factor).astype(int)
-            target_logi_workers[needs_scaling_mask] = (target_logi_workers[needs_scaling_mask] * scale_factor).astype(int)
-            target_sales_workers[needs_scaling_mask] = (target_sales_workers[needs_scaling_mask] * scale_factor).astype(int)
-
-        # Set final targets, ensuring production workers never fall below the minimum.
-        sim.firms['target_prod_workers'][normal_mask] = np.maximum(sim.config['min_target_workers'], target_prod_workers)
-        sim.firms['target_logi_workers'][normal_mask] = target_logi_workers
-        sim.firms['target_sales_workers'][normal_mask] = target_sales_workers
+    # --- APPLY THE NEW UNIFIED STRATEGY ---
+    active_indices = np.where(active_mask)[0]
+    if len(active_indices) > 0:
+        sim.firms['price'][active_mask] = proposed_strategy['price']
+        sim.firms['target_prod_workers'][active_mask] = proposed_strategy['target_prod']
+        sim.firms['target_logi_workers'][active_mask] = proposed_strategy['target_logi']
+        sim.firms['target_sales_workers'][active_mask] = proposed_strategy['target_sales']
 
     # --- Final Price Floor Enforcement ---
     # A firm is forbidden from selling a product for less than its true unit cost.
@@ -302,7 +233,7 @@ def update(sim, summary):
     price_floor_mask = (sim.firms['price'] < unit_cost) & active_mask
     if np.any(price_floor_mask):
         sim.firms['price'][price_floor_mask] = unit_cost[price_floor_mask]
-        sim.firms['price_driver'][price_floor_mask] = 'FL'
+        # sim.firms['price_driver'][price_floor_mask] = 'FL' # Obsolete field
         # Instead of logging every hit, we aggregate this event.
         # The count will be displayed in the main 5-tick summary.
         num_hits = np.sum(price_floor_mask)

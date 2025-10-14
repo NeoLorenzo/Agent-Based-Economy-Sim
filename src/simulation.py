@@ -38,6 +38,7 @@ class Simulation:
         self.config = config
         self.tick_events = collections.Counter()
         self.firm_owner_map = {}
+        self.proposed_strategy = {} # Holds the output of the new AI for logging
         
         self.firm_positions = {}
         self.household_positions = {}
@@ -99,19 +100,24 @@ class Simulation:
             ('inventory', 'i4'), ('target_inventory', 'i4'), ('revenue_this_tick', 'f8'),
             ('units_sold_last_tick', 'i4'), ('production_cost_last_tick', 'f8'),
             ('wages_paid_last_tick', 'f8'), ('profit_last_tick', 'f8'),
-            ('previous_profit', 'f8'), ('ticks_of_falling_profit', 'i4'),
-            ('ticks_of_stable_profit', 'i4'), ('last_price_direction', 'i4'),
+            ('previous_profit', 'f8'), # Kept for potential future analysis
+            # ('ticks_of_falling_profit', 'i4'), # Obsolete
+            # ('ticks_of_stable_profit', 'i4'), # Obsolete
+            # ('last_price_direction', 'i4'), # Obsolete
             ('num_prod_workers', 'i4'), ('num_logi_workers', 'i4'), ('num_sales_workers', 'i4'),
             ('target_prod_workers', 'i4'), ('target_logi_workers', 'i4'), ('target_sales_workers', 'i4'),
             ('failed_to_hire_last_tick', '?'), ('is_bankrupt', '?'),
-            ('ai_mode', 'U10'), ('price_driver', 'U2')
+            # ('ai_mode', 'U10'), # Obsolete
+            # ('price_driver', 'U2'), # Obsolete
+            # --- Fields for Unified Strategy AI ---
+            ('health_inventory', 'f4'), ('health_sales', 'f4'),
+            ('health_profit', 'f4'), ('health_capital', 'f4')
         ]
         self.firms = np.zeros(self.config['N_F'], dtype=firm_dtype)
         
         self.firms['balance'] = self.config['firm_initial_capital']
         self.firms['price'] = self.config['p']
         self.firms['wage_rate'] = self.config['wage_rate']
-        self.firms['last_price_direction'] = 1
         
         household_dtype = [('balance', 'f8'), ('size', 'i4'), ('employer_id', 'i4'), ('job_role', 'i4')]
         self.households = np.zeros(self.config['N_H'], dtype=household_dtype)
@@ -140,6 +146,12 @@ class Simulation:
 
         history_ticks = self.config.get('sales_history_ticks', 10)
         self.firm_sales_history = np.zeros((self.config['N_F'], history_ticks), dtype=int)
+
+        # --- State variables for Unified Strategy AI EWMA calculations ---
+        self.firm_sales_ewma_short = np.zeros(self.config['N_F'], dtype='f8')
+        self.firm_sales_ewma_long = np.zeros(self.config['N_F'], dtype='f8')
+        self.firm_profit_ewma_short = np.zeros(self.config['N_F'], dtype='f8')
+        self.firm_profit_ewma_long = np.zeros(self.config['N_F'], dtype='f8')
         
         logger.info("World setup complete.")
 

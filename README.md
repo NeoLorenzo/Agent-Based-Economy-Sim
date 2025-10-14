@@ -54,9 +54,9 @@ The behavior of the economy is driven by the goals and intelligence of its two a
 
 *   **Firms:** The producers, employers, and strategic heart of the simulation.
     *   **Goal:** Maximize long-term profit.
-    *   **Behavior:** Firms operate with an adaptive, two-mode AI that uses profit as its primary feedback signal. This AI is the engine of the simulation's emergent behavior.
-        *   **Inputs for Decisions:** A firm's strategy is determined by a combination of factors: its profit trend (rising or falling), current inventory levels, smoothed historical sales data, and its available capital.
-        *   **Adaptive Strategy:** The firm's decision-making process is a form of reinforcement learning; strategies that lead to increased profit are continued, while strategies that lead to falling profit are abandoned in favor of new, exploratory actions.
+    *   **Behavior:** Firms operate using a **Modular Health Check & Response System**. This unified AI synthesizes multiple data points into a single, coherent strategy each tick, allowing for fluid and proportional responses to changing market conditions.
+        *   **Inputs for Decisions:** A firm's strategy is determined by a continuous assessment of four key business functions: **Inventory Health** (current stock vs. target), **Sales Health** (the trend of customer demand), **Profitability Health** (the trend of the bottom line), and **Capital Health** (cash reserves).
+        *   **Adaptive Strategy:** The AI calculates a "health score" for each function, then translates these scores into competing "strategic impulses" (e.g., a large inventory surplus creates an impulse to cut prices and production). These impulses are weighted and summed to produce a final, rational decision for price and workforce targets, allowing the firm to navigate both booms and busts with nuanced, proportional actions.
 
 ### The Economic Cycle (Anatomy of a Single Tick)
 
@@ -75,20 +75,20 @@ Each tick of the simulation proceeds through a series of phases that model the f
     *   Firms pay wages to their employees. Firms that cannot afford their payroll go bankrupt, firing all employees and liquidating their assets.
     *   The firm's **profit** for the tick is then calculated using the fundamental business equation:
         `Profit = Revenue - (Wages_Paid + Raw_Material_Costs)`
-    *   This profit calculation is the single most important metric that drives all subsequent firm behavior.
+    *   This profit calculation is a critical metric that feeds into the firm's strategic decision-making.
 
 4.  **Firm Strategy Phase (The "Brain"):**
-    *   This is the core of the agent AI. Each firm assesses its performance and decides on its strategy for the next tick. The AI operates in one of two modes:
+    *   This is the core of the agent AI. Each firm uses its **Modular Health Check & Response System** to assess its performance and decide on its strategy for the next tick. The process occurs in three stages:
 
-    *   **A. "Exploitation" Mode (Normal Operations):**
-        *   This is the default state when profit is stable or growing.
-        *   **Pricing:** The firm makes small, incremental price adjustments. If profit is rising, it continues its last price change (e.g., continues raising prices). If profit is stable, it uses inventory levels relative to historical sales as a tie-breaker to fine-tune its price.
-        *   **Production:** The firm sets a `target_num_workers` with the goal of producing enough to meet its smoothed average sales demand while maintaining a small inventory buffer. This target is constrained by a budget; a firm will not target a workforce expansion it cannot afford.
+    *   **A. Health Check:** The firm first performs a comprehensive self-assessment, calculating a "health score" from -1.0 (critical) to +1.0 (excellent) for its four core business functions:
+        1.  **Inventory Health:** How does the current inventory level compare to the ideal target based on sales?
+        2.  **Sales Health:** Is the trend of customer demand (sales volume) growing or shrinking?
+        3.  **Profitability Health:** Is the trend of the firm's bottom-line profit rising or falling?
+        4.  **Capital Health:** Does the firm have enough cash reserves to survive the near future?
 
-    *   **B. "Exploration" Mode (Crisis Operations):**
-        *   If a firm's profit has fallen for a configured number of consecutive ticks, it concludes its current strategy has failed and enters a crisis.
-        *   **Pricing:** It makes a large, experimental price cut (e.g., 25%) to break out of its failing strategy and explore new market demand at a lower price point.
-        *   **Production:** It aggressively slashes its `target_num_workers` to cut costs and survive the crisis.
+    *   **B. Strategy Formulation:** Each health score generates "strategic impulses"—suggestions for action. For example, a poor Sales Health score generates a strong impulse to cut prices, while a poor Inventory Health score (a large surplus) generates impulses to both cut prices and reduce production.
+
+    *   **C. Action Synthesis:** The AI synthesizes all competing impulses into a single, coherent decision. It weighs the impulse from each department to determine a final, proportional adjustment for its price and its target workforce for the next tick. For example, the impulse to raise prices due to high profits might be overruled by a stronger impulse to cut prices due to collapsing sales. A critical "capital veto" prevents firms with low cash reserves from making risky expansionary hires, regardless of other positive signals.
 
     *   **The Unbreakable Law of Profitability:** After all strategic decisions are made, a final rule is enforced: a firm's price is **never allowed to fall below its marginal cost of production** (`raw_material_cost + wage_per_unit`). This prevents firms from intentionally selling goods at a loss and ensures their long-term viability.
 
@@ -106,8 +106,8 @@ The simulation strives for behavioral and procedural realism. Below are key real
 
 | Realistic Feature | How It's Modeled in the Simulation |
 | :--- | :--- |
-| **Profit Motive** | The core driver of all firm behavior. Price, production, and employment strategies are adjusted based on profit feedback from the previous tick. |
-| **Price Dynamics** | Prices are not fixed; they emerge from the strategic decisions of firms. Firms raise prices when demand is strong (rising profits) and cut them when demand falters (falling profits). |
+| **Profit Motive** | The core driver of all firm behavior. Price, production, and employment strategies are adjusted based on a synthesis of profit trends, sales data, and inventory levels. |
+| **Price Dynamics** | Prices are not fixed; they emerge from the strategic decisions of firms. Firms raise prices when demand is strong and cut them when demand falters or inventory is high. |
 | **Business Cycles** | The simulation naturally produces cycles of expansion (boom) and contraction (recession) without being explicitly programmed to do so. |
 | **Competitive Labor Market** | Households are not passive workers. They actively seek higher wages, forcing firms to compete for labor and influencing the market wage rate. |
 | **Capital Constraints** | Firms are limited by their balance. They cannot pay wages they don't have, leading to bankruptcy. Hiring plans are constrained by a budget for expansion. |
@@ -139,7 +139,7 @@ The interaction of these systems produces a robust, multi-stage economic narrati
 
 2.  **Market Saturation & Recession:** The economy inevitably reaches a peak. High prices stifle demand, and firms find their profits begin to fall. This triggers a market-wide correction. The firms' AI correctly identifies the downturn and enters a recessionary strategy: they lay off workers en masse to cut costs and slash prices to regain customers.
 
-3.  **The Stable Equilibrium:** The recession does not lead to a total collapse. The "Law of Profitability" provides a natural floor for the price crash. At this point, firms can no longer compete on price and must instead compete on efficiency. The simulation settles into a dynamic, sustainable equilibrium where firms actively manage their smaller workforces to meet the now-stable consumer demand, ensuring their long-term profitability and survival.
+3.  **The Stable Equilibrium:** The recession does not lead to a total collapse. The "Law of Profitability" provides a natural floor for the price crash. The simulation settles into a dynamic, low-level equilibrium where firms, now with minimal workforces, actively adjust their prices to compete for the scarce remaining consumer demand, ensuring their long-term survival.
 
 <br>
 
@@ -156,9 +156,11 @@ The interaction of these systems produces a robust, multi-stage economic narrati
 
 ## Roadmap & Future Work
 
-The simulation's current primary challenge is a systemic failure mode: it consistently falls into a **liquidity trap** where firms and a few owner-households hoard nearly all the economy's wealth, causing a collapse in consumer demand and mass unemployment. This is caused by a "leaking bucket" effect, where the mechanisms for returning money to the general household sector are insufficient to counteract the wealth extracted through sales. This is exacerbated by the current major abstraction of a "magical" raw material cost, where money spent on resources is instantly and equally redistributed to all households.
+Recent architectural improvements have replaced the original firm AI with a more robust, rational, and proportional decision-making system. This has proven that the simulation's primary challenge—a systemic failure mode where the economy consistently falls into a **liquidity trap**—is not a flaw in agent intelligence but a structural problem in the macroeconomic model.
 
-The central aim of future development is to solve this systemic imbalance through two complementary strategies:
+The economy collapses because the mechanisms for returning money to the general household sector (wages, dividends) are insufficient to counteract the wealth extracted through sales. This leads to wealth hoarding by firms, a collapse in consumer demand, and mass unemployment.
+
+The central aim of future development is to solve this systemic imbalance by making the economy more complex and robust through two complementary strategies:
 
 1.  **Developing a Realistic Supply Chain:** The raw material abstraction will be replaced with an ecosystem of specialized firms. The hypothesis is that creating a robust business-to-business (B2B) economy will force firms to pay each other for goods and services. This will require a larger, more diverse workforce, naturally circulating more money back into the household sector through wages and plugging the systemic leak from the production side.
 

@@ -19,6 +19,38 @@ def update(sim, total_payout, summary):
     Firms hire and fire workers based on economic conditions.
     This version includes logic for different job roles and internal reassignment.
     """
+    # --- Step 0: Resynchronize Worker Counts ---
+    # This is a critical bug fix. The firm's worker counts can become stale
+    # during chaotic periods of hiring and firing. We must recalculate the
+    # actual number of employees from the authoritative source (the households
+    # array) before any new labor market decisions are made.
+    
+    num_firms = sim.config['N_F']
+    prod_counts = np.zeros(num_firms, dtype=int)
+    logi_counts = np.zeros(num_firms, dtype=int)
+    sales_counts = np.zeros(num_firms, dtype=int)
+
+    employed_mask = sim.households['employer_id'] != -1
+    employer_ids = sim.households['employer_id'][employed_mask]
+    job_roles = sim.households['job_role'][employed_mask]
+
+    # Create masks for each role to count them
+    is_prod = job_roles == 1
+    is_logi = job_roles == 2
+    is_sales = job_roles == 3
+
+    # Use np.add.at for a safe and efficient vectorized count
+    np.add.at(prod_counts, employer_ids[is_prod], 1)
+    np.add.at(logi_counts, employer_ids[is_logi], 1)
+    np.add.at(sales_counts, employer_ids[is_sales], 1)
+
+    # Overwrite the stale cache with the ground truth
+    sim.firms['num_prod_workers'] = prod_counts
+    sim.firms['num_logi_workers'] = logi_counts
+    sim.firms['num_sales_workers'] = sales_counts
+    
+    logger.debug("Resynchronized firm worker counts from household data.")
+    
     logger.debug("Start Labor Market Phase")
     active_mask = ~sim.firms['is_bankrupt']
 

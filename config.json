@@ -43,6 +43,32 @@
   "firm_layoff_capital_threshold_factor": 2.0,
   "firm_hiring_revenue_threshold_factor": 1.5,
   "dividend_payout_rate": 0.01,
+  "unified_strategy_ai": {
+    "health_check_params": {
+      "inventory_ratio_healthy": 1.0,
+      "inventory_ratio_critical_surplus": 5.0,
+      "inventory_ratio_critical_shortage": 0.0,
+      "sales_trend_ema_short_ticks": 3,
+      "sales_trend_ema_long_ticks": 10,
+      "profit_trend_ema_short_ticks": 3,
+      "profit_trend_ema_long_ticks": 10,
+      "capital_coverage_healthy_ticks": 20.0,
+      "capital_coverage_critical_ticks": 2.0,
+      "trend_ratio_tanh_scaler": 2.0
+    },
+    "impulse_weight_params": {
+      "price_impulse_weight_inventory": 0.5,
+      "price_impulse_weight_sales": 0.5,
+      "price_impulse_weight_profit": 0.1,
+      "production_impulse_weight_inventory": -0.5,
+      "production_impulse_weight_sales": 0.3,
+      "production_impulse_weight_profit": 0.2
+    },
+    "action_synthesis_params": {
+      "max_price_adjustment_factor": 0.10,
+      "max_workforce_adjustment_factor": 0.25
+    }
+  },
   "logging": {
     "version": 1,
     "disable_existing_loggers": false,

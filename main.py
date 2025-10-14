@@ -74,8 +74,6 @@ def main():
     sim = Simulation(config)
     event_log_aggregator = collections.Counter()
     summary_aggregator = collections.Counter()
-    ai_mode_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
-    price_driver_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
     
     inventory_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
     price_graph_data = {firm_id: [] for firm_id in range(len(sim.firms))}
@@ -105,11 +103,6 @@ def main():
                 transactions, summary, tick_events = sim.run_one_tick(tick_counter)
                 event_log_aggregator.update(tick_events)
                 summary_aggregator.update(summary)
-
-                # Aggregate AI state data every tick
-                for i in range(config['N_F']):
-                    ai_mode_aggregator[i][sim.firms['ai_mode'][i]] += 1
-                    price_driver_aggregator[i][sim.firms['price_driver'][i]] += 1
                 
                 # Log a detailed summary every 5 ticks.
                 if tick_counter > 0 and tick_counter % 5 == 0:
@@ -166,13 +159,8 @@ def main():
                             total_target = firm['target_prod_workers'] + firm['target_logi_workers'] + firm['target_sales_workers']
                             worker_str = f"{total_workers}/{total_target} ({firm['num_prod_workers']}/{firm['num_logi_workers']}/{firm['num_sales_workers']})"
 
-                            # Format the new AI summary string
-                            mode_str = _format_summary_string(ai_mode_aggregator[i])
-                            driver_str = _format_summary_string(price_driver_aggregator[i])
-                            ai_summary_str = f"{mode_str} [{driver_str}]"
-
                             logger.info(
-                                "    - Firm %d: Bal: %9.2f | Inv: %5d | Price: %5.2f (UC: %4.2f) | Workers: %-15s | Profit: %9.2f | AI: %-20s | Avg Sales: %5.1f",
+                                "    - Firm %d: Bal: %9.2f | Inv: %5d | Price: %5.2f (UC: %4.2f) | Workers: %-15s | Profit: %9.2f | Avg Sales: %5.1f",
                                 i,
                                 firm['balance'],
                                 firm['inventory'],
@@ -180,9 +168,28 @@ def main():
                                 unit_cost,
                                 worker_str,
                                 firm['profit_last_tick'],
-                                ai_summary_str,
                                 average_sales
                             )
+                            # --- NEW: Log the output of the Unified Strategy AI for validation ---
+                            if hasattr(sim, 'proposed_strategy') and sim.proposed_strategy:
+                                health_str = f"H(I:{firm['health_inventory']:.1f} S:{firm['health_sales']:.1f} P:{firm['health_profit']:.1f} C:{firm['health_capital']:.1f})"
+                                
+                                # Safely get proposed values for the current firm 'i'
+                                active_mask = ~sim.firms['is_bankrupt']
+                                active_indices_list = np.where(active_mask)[0].tolist()
+                                if i in active_indices_list:
+                                    idx_in_proposal = active_indices_list.index(i)
+                                    
+                                    prop_price = sim.proposed_strategy['price'][idx_in_proposal]
+                                    price_imp = sim.proposed_strategy['price_impulse'][idx_in_proposal]
+                                    prop_p = sim.proposed_strategy['target_prod'][idx_in_proposal]
+                                    prop_l = sim.proposed_strategy['target_logi'][idx_in_proposal]
+                                    prop_s = sim.proposed_strategy['target_sales'][idx_in_proposal]
+                                    prod_imp = sim.proposed_strategy['prod_impulse'][idx_in_proposal]
+                                    
+                                    proposal_str = f"Price->{prop_price:.2f} (Imp:{price_imp:.2f}) | Workers->{prop_p}/{prop_l}/{prop_s} (Imp:{prod_imp:.2f})"
+                                    
+                                    logger.info("      [NEW AI] %-45s | %s", health_str, proposal_str)
 
                     # Log the aggregated production stats over the last 5 ticks
                     logger.info(
@@ -197,10 +204,6 @@ def main():
                         event_str = " | ".join(f"{key.replace('_', ' ').title()}: {val}" for key, val in sorted(event_log_aggregator.items()))
                         logger.info("  Events (last 5 ticks): %s", event_str)
                         event_log_aggregator.clear()
-                    
-                    # Reset AI aggregators for the next window
-                    ai_mode_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
-                    price_driver_aggregator = {i: collections.Counter() for i in range(config['N_F'])}
 
                 inventory_graph_data, price_graph_data, capital_graph_data, employee_graph_data = sim.update_and_get_firm_data_for_render()
                 
